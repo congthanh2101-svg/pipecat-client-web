@@ -1092,17 +1092,41 @@ function handleBinaryMessage(arrayBuffer) {
   log('Unknown binary: ' + data.length + ' bytes', 'recv');
 }
 
-function connectWebSocket() {
+async function connectWebSocket() {
   const rawPhone = phoneInput.value.trim();
   if (!rawPhone) { log('Please enter a phone number', 'error'); return; }
 
   setStatus('connecting');
   const conversationId = crypto.randomUUID();
-  const url = WS_URL + '?phone=' + encodeURIComponent(rawPhone) +
-              '&conv&conversation_id=' + encodeURIComponent(conversationId);
-  log('Connecting to Pipecat server...', 'event');
 
-  ws = new WebSocket(url);
+  // Step 1: POST /api/connect to get WebSocket URL from backend
+  log('Fetching WebSocket URL from /api/connect...', 'event');
+  let wsUrl;
+  try {
+    const connectResp = await fetch('/api/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phone: rawPhone,
+        conv: '',
+        conversation_id: conversationId,
+      }),
+    });
+    const connectData = await connectResp.json();
+    wsUrl = connectData.wsUrl || connectData.ws_url;
+    if (!wsUrl) throw new Error('No wsUrl in response: ' + JSON.stringify(connectData));
+    log('Got wsUrl: ' + wsUrl, 'event');
+  } catch (e) {
+    log('Failed to get WebSocket URL: ' + e.message, 'error');
+    setStatus('error');
+    return;
+  }
+
+  // Step 2: Connect WebSocket to the returned URL
+  log('Connecting WebSocket...', 'event');
+  log('WebSocket URL: ' + wsUrl, 'event');
+
+  ws = new WebSocket(wsUrl);
   ws.binaryType = 'arraybuffer';
 
   ws.onopen = function () {
@@ -1197,7 +1221,7 @@ async function toggleConnection() {
     // Connect flow: mic capture first, then WebSocket.
     try {
       await startAudioCapture();
-      connectWebSocket();
+      await connectWebSocket();
 
       // Wait for WS to open and exchange initial messages
       await new Promise((resolve, reject) => {

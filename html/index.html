@@ -805,7 +805,7 @@ function handleBinaryMessage(arrayBuffer) {
   playAudio(arrayBuffer);
 }
 
-function connectWebSocket() {
+async function connectWebSocket() {
   const rawPhone = phoneInput.value.trim();
   if (!rawPhone) {
     log('Please enter a phone number', 'error');
@@ -813,15 +813,36 @@ function connectWebSocket() {
   }
 
   setStatus('connecting');
-  log('Connecting to Pipecat server...', 'event');
-
-  // Build URL: wss://.../ws?phone={phone}&conv&conversation_id={uuid}
   const conversationId = crypto.randomUUID();
-  const url = WS_BASE_URL + '?phone=' + encodeURIComponent(rawPhone) +
-              '&conv&conversation_id=' + encodeURIComponent(conversationId);
-  log('WebSocket URL: ' + url, 'event');
 
-  ws = new WebSocket(url);
+  // Step 1: POST /api/connect to get WebSocket URL from backend
+  log('Fetching WebSocket URL from /api/connect...', 'event');
+  let wsUrl;
+  try {
+    const connectResp = await fetch('/api/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phone: rawPhone,
+        conv: '',
+        conversation_id: conversationId,
+      }),
+    });
+    const connectData = await connectResp.json();
+    wsUrl = connectData.wsUrl || connectData.ws_url;
+    if (!wsUrl) throw new Error('No wsUrl in response: ' + JSON.stringify(connectData));
+    log('Got wsUrl: ' + wsUrl, 'event');
+  } catch (e) {
+    log('Failed to get WebSocket URL: ' + e.message, 'error');
+    setStatus('error');
+    return;
+  }
+
+  // Step 2: Connect WebSocket to the returned URL
+  log('Connecting to Pipecat server via WebSocket...', 'event');
+  log('WebSocket URL: ' + wsUrl, 'event');
+
+  ws = new WebSocket(wsUrl);
   ws.binaryType = 'arraybuffer';
 
   ws.onopen = function () {
@@ -917,7 +938,7 @@ async function toggleConnection() {
     // Connect flow
     try {
       await startAudioCapture();
-      connectWebSocket();
+      await connectWebSocket();
     } catch (e) {
       log('Failed to start: ' + e.message, 'error');
       if (e.name === 'NotAllowedError') {

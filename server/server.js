@@ -39,6 +39,7 @@ const PORT = parseInt(process.env.PORT || process.argv.find((_, i, a) => a[i-1] 
 const BACKEND_WS = process.env.BACKEND_WS
   || (process.argv.includes('--backend') ? process.argv[process.argv.indexOf('--backend') + 1] : null)
   || 'wss://aeon-pipecat.securityzone.vn/ws';
+const BACKEND_HTTP = process.env.BACKEND_HTTP || 'https://rtstt-demo.securityzone.vn';
 
 const HOST = process.env.HOST || `localhost:${PORT}`;
 const PROTOCOL = process.env.PROTOCOL || 'ws';
@@ -96,6 +97,32 @@ app.post('/connect', (req, res) => {
 
   console.log(`[SESSION] Created ${sessionId} — phone=${phone} → ${wsUrl}`);
   res.json({ wsUrl });
+});
+
+// ── POST /api/connect — proxy to real Pipecat backend connect endpoint ────
+
+app.post('/api/connect', async (req, res) => {
+  try {
+    const { phone } = req.body || {};
+    const conversationId = req.body?.conversation_id || crypto.randomUUID();
+    const body = { phone: phone || '0909835115', conv: '', conversation_id: conversationId };
+
+    console.log(`[API] /api/connect -> ${BACKEND_HTTP}/connect phone=${body.phone} conv=${body.conversation_id}`);
+    const resp = await fetch(`${BACKEND_HTTP}/connect`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Origin': 'https://web.securityzone.vn',
+      },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    console.log(`[API] Response: wsUrl=${data.wsUrl}`);
+    res.json(data);
+  } catch (err) {
+    console.error(`[API] /api/connect error: ${err.message}`);
+    res.status(502).json({ error: err.message });
+  }
 });
 
 // ── GET /api/health ──────────────────────────────────────────────────────────
