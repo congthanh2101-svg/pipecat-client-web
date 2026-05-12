@@ -815,13 +815,17 @@ async function connectWebSocket() {
   setStatus('connecting');
   const conversationId = crypto.randomUUID();
 
-  // Step 1: POST /api/connect to get WebSocket URL from backend
-  log('Fetching WebSocket URL from /api/connect...', 'event');
+  // Step 1: POST to Pipecat TTS Server /connect to get WebSocket URL
+  const CONNECT_URL = 'https://rtstt-demo.securityzone.vn/connect';
+  log('Fetching WebSocket URL from Pipecat TTS Server...', 'event');
   let wsUrl;
   try {
-    const connectResp = await fetch('/api/connect', {
+    const connectResp = await fetch(CONNECT_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Origin': 'https://web.securityzone.vn',
+      },
       body: JSON.stringify({
         phone: rawPhone,
         conv: '',
