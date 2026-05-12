@@ -1,0 +1,23 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]: P
+    - heading "Pipecat AI Client" [level=1] [ref=e4]
+  - generic [ref=e7]: Disconnected
+  - generic [ref=e8]:
+    - generic [ref=e9]: "Phone:"
+    - textbox "Phone:" [ref=e10]:
+      - /placeholder: Enter phone number
+      - text: "0909835115"
+    - button "Connect" [ref=e11] [cursor=pointer]
+  - generic [ref=e12]:
+    - generic [ref=e13]:
+      - generic [ref=e14]: Conversation Transcript
+      - generic [ref=e16]: Transcriptions will appear here...
+    - generic [ref=e17]:
+      - generic [ref=e18]:
+        - generic [ref=e19]: Debug Log
+        - button "Clear" [ref=e20] [cursor=pointer]
+      - generic [ref=e21]:
+        - generic [ref=e22]: 2026-05-12T05:39:50.983Z - Pipecat AI Client initialized
+        - generic [ref=e23]: "2026-05-12T05:39:51.020Z - Browser: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+        - generic [ref=e24]: "2026-05-12T05:39:51.022Z - Protocol: RTVI over WebSocket, Audio: PCM Float32 16kHz mono"

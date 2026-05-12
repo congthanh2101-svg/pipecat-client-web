@@ -1,0 +1,28 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]: P
+    - heading "Pipecat AI Client" [level=1] [ref=e4]
+  - generic [ref=e7]: Connecting...
+  - generic [ref=e8]:
+    - generic [ref=e9]: "Phone:"
+    - textbox "Phone:" [ref=e10]:
+      - /placeholder: Enter phone number
+      - text: "0909835115"
+    - button "Connecting..." [disabled] [ref=e25]
+  - generic [ref=e12]:
+    - generic [ref=e13]:
+      - generic [ref=e14]: Conversation Transcript
+      - generic [ref=e16]: Transcriptions will appear here...
+    - generic [ref=e17]:
+      - generic [ref=e18]:
+        - generic [ref=e19]: Debug Log
+        - button "Clear" [ref=e20] [cursor=pointer]
+      - generic [ref=e21]:
+        - generic [ref=e22]: 2026-05-12T05:52:10.603Z - Pipecat AI Client initialized
+        - generic [ref=e23]: "2026-05-12T05:52:10.604Z - Browser: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+        - generic [ref=e24]: "2026-05-12T05:52:10.604Z - Protocol: RTVI over WebSocket, Audio: PCM Float32 16kHz mono"
+        - generic [ref=e26]: 2026-05-12T05:52:13.191Z - Microphone access granted
+        - generic [ref=e27]: "2026-05-12T05:52:13.268Z - AudioContext created, sample rate: 48000 Hz"
+        - generic [ref=e28]: "2026-05-12T05:52:13.299Z - Audio capture: AudioWorklet"
+        - generic [ref=e29]: 2026-05-12T05:52:13.300Z - Connecting to Pipecat server...
+        - generic [ref=e30]: "2026-05-12T05:52:13.301Z - WebSocket URL: wss://aeon-pipecat.securityzone.vn/ws?phone=0909835115&conv&conversation_id=602db3bf-794c-411f-b2b7-2b540c6c34e6"

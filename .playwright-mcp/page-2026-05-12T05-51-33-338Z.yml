@@ -1,0 +1,41 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]: P
+    - heading "Pipecat AI Client" [level=1] [ref=e4]
+  - generic [ref=e5]:
+    - generic [ref=e7]: Disconnected
+    - generic [ref=e25]: 🔊 Bot speaking...
+  - generic [ref=e8]:
+    - generic [ref=e9]: "Phone:"
+    - textbox "Phone:" [ref=e10]:
+      - /placeholder: Enter phone number
+      - text: "0909835115"
+    - button "Connect" [ref=e11] [cursor=pointer]
+  - generic [ref=e12]:
+    - generic [ref=e13]:
+      - generic [ref=e14]: Conversation Transcript
+      - generic [ref=e26]: Xin chào anh/chị. Em là trợ lý CSKH AEON Mall Việt Nam. Em có thể giúp gì cho anh/chị?
+    - generic [ref=e17]:
+      - generic [ref=e18]:
+        - generic [ref=e19]: Debug Log
+        - button "Clear" [ref=e20] [cursor=pointer]
+      - generic [ref=e21]:
+        - generic [ref=e22]: 2026-05-12T05:51:21.996Z - Pipecat AI Client initialized
+        - generic [ref=e23]: "2026-05-12T05:51:21.998Z - Browser: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+        - generic [ref=e24]: "2026-05-12T05:51:21.999Z - Protocol: RTVI over WebSocket, Audio: PCM Float32 16kHz mono"
+        - generic [ref=e27]: 2026-05-12T05:51:24.890Z - Microphone access granted
+        - generic [ref=e28]: "2026-05-12T05:51:24.949Z - AudioContext created, sample rate: 48000 Hz"
+        - generic [ref=e29]: "2026-05-12T05:51:24.961Z - Audio capture: AudioWorklet"
+        - generic [ref=e30]: 2026-05-12T05:51:24.962Z - Connecting to Pipecat server...
+        - generic [ref=e31]: "2026-05-12T05:51:24.962Z - WebSocket URL: wss://aeon-pipecat.securityzone.vn/ws?phone=0909835115&conv&conversation_id=4dfcd45f-dfd2-4b50-9f1d-b4ac58f5d2a9"
+        - generic [ref=e32]: 2026-05-12T05:51:25.245Z - WebSocket connected
+        - generic [ref=e33]: 2026-05-12T05:51:25.246Z - [S] client-ready
+        - generic [ref=e34]: "2026-05-12T05:51:25.248Z - [R] metrics {\"ttfb\":[{\"processor\":\"MultiSTTService#93\",\"value\":0},{\"processor\":\"N8NLLMService#93\",\"value\":0},{\"processor\":\"OmniVoiceOpenAIService#93\",\"value\":0}],\"processing\":[{\"processor\":\"MultiSTTService#93\",\"v"
+        - generic [ref=e35]: "2026-05-12T05:51:25.249Z - [R] bot-output {\"text\":\"Xin chào anh/chị. Em là trợ lý CSKH AEON Mall Việt Nam. Em có thể giúp gì cho anh/chị?\",\"spoken\":false,\"aggregated_by\":\"sentence\"}"
+        - generic [ref=e36]: 2026-05-12T05:51:25.249Z - [R] bot-tts-started
+        - generic [ref=e37]: 2026-05-12T05:51:25.249Z - Bot TTS started
+        - generic [ref=e38]: "2026-05-12T05:51:25.258Z - [R] bot-ready {\"version\":\"1.1.0\",\"about\":{\"library\":\"pipecat-ai\",\"library_version\":\"0.0.99\"}}"
+        - generic [ref=e39]: 2026-05-12T05:51:25.265Z - Bot is ready - connection established
+        - generic [ref=e40]: "2026-05-12T05:51:25.266Z - WebSocket closed: code=1000 reason=none"
+        - generic [ref=e41]: 2026-05-12T05:51:25.269Z - Microphone released
+        - generic [ref=e42]: 2026-05-12T05:51:25.273Z - AudioContext closed

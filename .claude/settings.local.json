@@ -57,7 +57,16 @@
       "Bash(curl -sL -o /dev/null -w \"%{http_code}\" \"http://localhost:8080/ac/pipecat-client-web/html/\" --max-time 5)",
       "Bash(curl -sL -o /dev/null -w \"%{http_code}\" \"http://localhost:8080/ac/pipecat-client-web/react/\" --max-time 5)",
       "Bash(curl -sL -o /dev/null -w \"%{http_code}\" \"http://localhost:8080/ac/pipecat-client-web/vite/\" --max-time 5)",
-      "Bash(curl -sL -o /dev/null -w \"%{http_code}\" \"http://localhost:8080/ac/pipecat-client-web/pipecat-ai-plan.html\" --max-time 5)"
+      "Bash(curl -sL -o /dev/null -w \"%{http_code}\" \"http://localhost:8080/ac/pipecat-client-web/pipecat-ai-plan.html\" --max-time 5)",
+      "PowerShell(npx @anthropic-ai/claude-code plugin install playwright@claude-plugins-official)",
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "mcp__plugin_playwright_playwright__browser_console_messages",
+      "mcp__plugin_playwright_playwright__browser_snapshot",
+      "mcp__plugin_playwright_playwright__browser_click",
+      "mcp__plugin_playwright_playwright__browser_evaluate",
+      "mcp__plugin_playwright_playwright__browser_wait_for",
+      "Bash(curl *)",
+      "mcp__plugin_playwright_playwright__browser_run_code_unsafe"
     ]
   }
 }
