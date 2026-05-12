@@ -142,7 +142,9 @@ function encodeMessageFrame(jsonStr) {
  */
 function int16ToFloat32(int16Bytes) {
   if (!int16Bytes) return new Float32Array(0);
-  const int16 = new Int16Array(int16Bytes.buffer, int16Bytes.byteOffset, int16Bytes.length / 2);
+  // Copy to ensure 2-byte alignment (protobuf bytes may have odd byteOffset)
+  const aligned = new Uint8Array(int16Bytes);
+  const int16 = new Int16Array(aligned.buffer, aligned.byteOffset, aligned.length / 2);
   const float32 = new Float32Array(int16.length);
   for (let i = 0; i < int16.length; i++) {
     float32[i] = int16[i] / 32768;
