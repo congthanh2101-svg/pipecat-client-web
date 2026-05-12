@@ -1,0 +1,14 @@
+{
+  "name": "pipecat-bridge-server",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.12.0",
+    "express": "^4.22.2",
+    "ws": "^8.20.0"
+  }
+}
