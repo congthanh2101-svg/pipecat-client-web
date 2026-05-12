@@ -333,7 +333,24 @@ const transcriptBody = document.getElementById('transcriptBody');
 const speakingIndicator = document.getElementById('speakingIndicator');
 
 // ---- Constants ----
-const WS_BASE_URL = 'wss://aeon-pipecat.securityzone.vn/ws';
+const DIRECT_WS = 'wss://aeon-pipecat.securityzone.vn/ws'; // direct connection (bypass proxy)
+const PROXY_PORT = 3099;
+const params = new URLSearchParams(window.location.search);
+const wsOverride = params.get('ws');
+const proxyPort = params.get('proxy_port') || (isNaN(Number(params.get('pp'))) ? null : Number(params.get('pp')));
+let WS_URL;
+if (wsOverride === 'direct') {
+  WS_URL = DIRECT_WS;
+} else if (wsOverride) {
+  WS_URL = wsOverride;
+} else if (proxyPort) {
+  // Use proxy on specified port (e.g., when served from IIS: ?proxy_port=3099)
+  const protocol = (window.location.protocol === 'https:') ? 'wss:' : 'ws:';
+  WS_URL = protocol + '//' + window.location.hostname + ':' + proxyPort + '/ws';
+} else {
+  // Default: connect to same host:port (works when served from proxy)
+  WS_URL = ((window.location.protocol === 'https:') ? 'wss:' : 'ws:') + '//' + window.location.host + '/ws';
+}
 const AUDIO_SAMPLE_RATE = 16000;
 const MAX_LOG_ENTRIES = 300;
 
@@ -348,6 +365,8 @@ let nextPlayTime = 0;
 let transcriptEmpty = null;    // reference to empty-state div, removed on first message
 let isBotSpeaking = false;     // bot TTS state, for UI feedback
 let heartbeatTimer = null;     // WebSocket keepalive timer
+let silenceInterval = null;    // Silence frame generator for keepalive
+let micForwardingEnabled = false; // Mic audio forwarded to server only after greeting completes
 
 // ============================================================================
 //  SECTION 1: Varint & Binary Message Encoding/Decoding
@@ -600,27 +619,171 @@ function playAudio(arrayBuffer) {
   if (nextPlayTime < now) nextPlayTime = now;
   source.start(nextPlayTime);
   nextPlayTime += audioBuffer.duration;
-
-  log('Audio queued: ' + (audioBuffer.duration * 1000).toFixed(0) + 'ms at T+' + (nextPlayTime - now).toFixed(2) + 's', 'audio');
 }
+
+// ============================================================================
+//  SECTION 7b: Float32 → Int16 PCM Conversion
+// ============================================================================
+
+/**
+ * Convert Float32 audio samples to 16-bit PCM (little-endian Int16).
+ * This is the format expected by the Pipecat server.
+ */
+function floatTo16BitPCM(float32Array) {
+  const buffer = new ArrayBuffer(float32Array.length * 2);
+  const view = new DataView(buffer);
+  let offset = 0;
+  for (let i = 0; i < float32Array.length; i++, offset += 2) {
+    let s = Math.max(-1, Math.min(1, float32Array[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return buffer;
+}
+
+const SILENCE_FRAME_BYTES = AUDIO_SAMPLE_RATE * 2 * 0.02; // 640 bytes = 20ms Int16 PCM at 16kHz mono
 
 // ============================================================================
 //  SECTION 8: Audio Capture
 // ============================================================================
 
 const AUDIOWORKLET_CAPTURE_CODE = `
-class MicCaptureProcessor extends AudioWorkletProcessor {
-  process(inputs, outputs, parameters) {
-    const input = inputs[0];
-    if (input && input.length > 0 && input[0]) {
-      // Copy the channel data (cannot transfer the browser-owned buffer)
-      const copy = new Float32Array(input[0]);
-      this.port.postMessage(copy);
+class AudioProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.port.onmessage = this.receive.bind(this);
+    this.initialize();
+  }
+
+  initialize() {
+    this.foundAudio = false;
+    this.recording = true;
+    this.chunks = [];
+  }
+
+  readChannelData(chunks, channel) {
+    let channelLimit;
+    if (channel !== undefined && channel !== -1) {
+      if (chunks[0] && chunks[0].length - 1 < channel) {
+        return [];
+      }
+      channelLimit = channel + 1;
+    } else {
+      channel = 0;
+      channelLimit = Math.min(chunks[0] ? chunks[0].length : 1, 9);
+    }
+    const channels = [];
+    for (let n = channel; n < channelLimit; n++) {
+      const length = chunks.reduce((sum, chunk) => sum + chunk[n].length, 0);
+      const buffers = chunks.map((chunk) => chunk[n]);
+      const result = new Float32Array(length);
+      let offset = 0;
+      for (let i = 0; i < buffers.length; i++) {
+        result.set(buffers[i], offset);
+        offset += buffers[i].length;
+      }
+      channels[n] = result;
+    }
+    return channels;
+  }
+
+  formatAudioData(channels) {
+    if (channels.length === 1) {
+      return { float32Array: channels[0].slice(), meanValues: channels[0].slice() };
+    }
+    const float32Array = new Float32Array(channels[0].length * channels.length);
+    const meanValues = new Float32Array(channels[0].length);
+    for (let i = 0; i < channels[0].length; i++) {
+      const offset = i * channels.length;
+      let meanValue = 0;
+      for (let n = 0; n < channels.length; n++) {
+        float32Array[offset + n] = channels[n][i];
+        meanValue += channels[n][i];
+      }
+      meanValues[i] = meanValue / channels.length;
+    }
+    return { float32Array, meanValues };
+  }
+
+  floatTo16BitPCM(float32Array) {
+    const buffer = new ArrayBuffer(float32Array.length * 2);
+    const view = new DataView(buffer);
+    for (let i = 0; i < float32Array.length; i++) {
+      let s = Math.max(-1, Math.min(1, float32Array[i]));
+      view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    }
+    return buffer;
+  }
+
+  process(inputList, outputList) {
+    // Pass audio through to output (speakers)
+    const sourceLimit = Math.min(inputList.length, outputList.length);
+    for (let inputNum = 0; inputNum < sourceLimit; inputNum++) {
+      const input = inputList[inputNum];
+      const output = outputList[inputNum];
+      const channelCount = Math.min(input.length, output.length);
+      for (let channelNum = 0; channelNum < channelCount; channelNum++) {
+        const inputChannel = input[channelNum];
+        const outputChannel = output[channelNum];
+        for (let i = 0; i < inputChannel.length; i++) {
+          outputChannel[i] = inputChannel[i];
+        }
+      }
+    }
+
+    const inputs = inputList[0];
+    if (!inputs || !inputs[0]) return true;
+
+    let sliceIndex = 0;
+    if (!this.foundAudio) {
+      for (const channel of inputs) {
+        sliceIndex = 0;
+        if (this.foundAudio) break;
+        if (channel) {
+          for (const value of channel) {
+            if (value !== 0) {
+              this.foundAudio = true;
+              break;
+            }
+            sliceIndex++;
+          }
+        }
+      }
+    }
+
+    if (this.foundAudio && this.recording) {
+      const chunk = inputs.map((input) => input.slice(sliceIndex));
+      this.chunks.push(chunk);
+      this.sendChunk(chunk);
     }
     return true;
   }
+
+  sendChunk(chunk) {
+    try {
+      const channels = this.readChannelData([chunk]);
+      const { float32Array, meanValues } = this.formatAudioData(channels);
+      this.port.postMessage({
+        event: 'chunk',
+        data: {
+          mono: this.floatTo16BitPCM(meanValues),
+          raw: this.floatTo16BitPCM(float32Array),
+        },
+      });
+    } catch (e) {
+      // Silently handle worklet errors
+    }
+  }
+
+  receive(e) {
+    const { event } = e.data;
+    switch (event) {
+      case 'start': this.recording = true; break;
+      case 'stop': this.recording = false; break;
+      case 'clear': this.initialize(); break;
+    }
+  }
 }
-registerProcessor('mic-capture', MicCaptureProcessor);
+registerProcessor('audio_processor', AudioProcessor);
 `;
 
 async function startAudioCapture() {
@@ -638,7 +801,7 @@ async function startAudioCapture() {
   // Create AudioContext
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   log('AudioContext created, sample rate: ' + audioCtx.sampleRate + ' Hz', 'event');
-  // Resume AudioContext (required on modern browsers, starts in 'suspended')
+  // Resume AudioContext (required on modern Chrome, starts in 'suspended')
   if (audioCtx.state === 'suspended') {
     await audioCtx.resume();
     log('AudioContext resumed', 'event');
@@ -656,18 +819,20 @@ async function startAudioCapture() {
       await audioCtx.audioWorklet.addModule(workletUrl);
       URL.revokeObjectURL(workletUrl);
 
-      const workletNode = new AudioWorkletNode(audioCtx, 'mic-capture');
+      const workletNode = new AudioWorkletNode(audioCtx, 'audio_processor');
       workletNode.port.onmessage = (event) => {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
-        const inputData = event.data; // Float32Array at AudioContext sample rate
-        const downsampled = resample(inputData, audioCtx.sampleRate, AUDIO_SAMPLE_RATE);
-        ws.send(downsampled.buffer);
+        if (!micForwardingEnabled) return; // gate mic until greeting completes
+        if (event.data && event.data.event === 'chunk') {
+          const monoData = event.data.data.mono; // Int16 PCM ArrayBuffer
+          ws.send(monoData);
+        }
       };
       micSourceNode.connect(workletNode);
-      // AudioWorkletNode does not need to connect to destination for capture-only
+      workletNode.connect(audioCtx.destination); // pass audio through to speakers
       micProcessorNode = workletNode;
       useWorklet = true;
-      log('Audio capture: AudioWorklet', 'audio');
+      log('Audio capture: AudioWorklet (audio_processor, Int16 PCM)', 'audio');
     } catch (e) {
       log('AudioWorklet failed: ' + e.message + ', falling back to ScriptProcessor', 'error');
     }
@@ -679,24 +844,26 @@ async function startAudioCapture() {
     const scriptNode = audioCtx.createScriptProcessor(bufferSize, 1, 1);
     scriptNode.onaudioprocess = (event) => {
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!micForwardingEnabled) return; // gate mic until greeting completes
       const inputData = event.inputBuffer.getChannelData(0);
       const downsampled = resample(inputData, audioCtx.sampleRate, AUDIO_SAMPLE_RATE);
-      ws.send(downsampled.buffer);
+      // Convert to Int16 PCM before sending
+      ws.send(floatTo16BitPCM(downsampled));
     };
     micSourceNode.connect(scriptNode);
-    // ScriptProcessorNode requires output connection to fire onaudioprocess,
-    // but routing mic directly to speakers creates feedback. Use silent gain.
+    // ScriptProcessorNode requires output connection to fire onaudioprocess.
+    // Use silent GainNode to avoid feedback loop.
     const silentGain = audioCtx.createGain();
     silentGain.gain.value = 0;
     scriptNode.connect(silentGain);
     silentGain.connect(audioCtx.destination);
     micProcessorNode = scriptNode;
-    log('Audio capture: ScriptProcessorNode (buffer=' + bufferSize + ')', 'audio');
+    log('Audio capture: ScriptProcessorNode (Int16 PCM, buffer=' + bufferSize + ')', 'audio');
   }
 }
 
 function stopAudioCapture() {
-  // Disconnect and clean up
+  // Stop mic and disconnect nodes, but keep AudioContext alive for TTS playback.
   if (micProcessorNode) {
     try { micProcessorNode.disconnect(); } catch (e) { /* ignore */ }
     micProcessorNode = null;
@@ -710,12 +877,48 @@ function stopAudioCapture() {
     micStream = null;
     log('Microphone released', 'event');
   }
+  // AudioContext is NOT closed here — queued TTS audio can still play.
+}
+
+function cleanupAudio() {
+  stopSilenceGenerator();
+  stopAudioCapture();
   if (audioCtx && audioCtx.state !== 'closed') {
     audioCtx.close().catch(() => {});
     audioCtx = null;
     log('AudioContext closed', 'event');
   }
   nextPlayTime = 0;
+}
+
+// ============================================================================
+//  SECTION 8b: Silence Generator (keepalive until mic data flows)
+// ============================================================================
+
+function startSilenceGenerator() {
+  if (silenceInterval) return;
+  log('Silence keepalive started', 'audio');
+
+  silenceInterval = setInterval(() => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      stopSilenceGenerator();
+      return;
+    }
+    try {
+      // Send zero Int16 PCM frames — silence that won't trigger VAD
+      ws.send(new ArrayBuffer(SILENCE_FRAME_BYTES));
+    } catch (e) {
+      stopSilenceGenerator();
+    }
+  }, 20);
+}
+
+function stopSilenceGenerator() {
+  if (silenceInterval) {
+    clearInterval(silenceInterval);
+    silenceInterval = null;
+    log('Silence keepalive stopped', 'audio');
+  }
 }
 
 // ============================================================================
@@ -774,6 +977,11 @@ function handleRTVIMessage(jsonStr) {
       log('Bot TTS stopped', 'event');
       isBotSpeaking = false;
       if (speakingIndicator) speakingIndicator.style.display = 'none';
+      // Enable mic forwarding now that the greeting is complete
+      if (!micForwardingEnabled) {
+        micForwardingEnabled = true;
+        log('Mic forwarding enabled', 'event');
+      }
       break;
 
     case 'error':
@@ -786,6 +994,74 @@ function handleRTVIMessage(jsonStr) {
   }
 }
 
+/**
+ * Extract Int16 PCM audio from a Pipecat protobuf audio frame.
+ * Format:
+ *   [0x12] [varint outer_len]
+ *     [0x08] [varint id]
+ *     [0x12] [varint str_len] [UTF-8 string "OutputAudioRawFrame#..."]
+ *     [0x1a] [varint audio_len] [Int16 PCM audio data]
+ */
+function extractAudioFromFrame(data) {
+  if (data.length < 5 || data[0] !== 0x12) return null;
+  let pos = 1;
+  // Skip outer length varint
+  while (pos < data.length && (data[pos] & 0x80)) pos++;
+  pos++;
+  // Scan for field with tag 0x1a (field 3, length-delimited = audio data)
+  while (pos + 2 < data.length) {
+    const tag = data[pos++];
+    if ((tag & 0x07) !== 2) {
+      // Not length-delimited — skip varint
+      while (pos < data.length && (data[pos] & 0x80)) pos++;
+      pos++;
+      continue;
+    }
+    let len = 0, shift = 0;
+    while (pos < data.length) {
+      const b = data[pos++];
+      len |= (b & 0x7f) << shift;
+      shift += 7;
+      if (!(b & 0x80)) break;
+    }
+    if (tag === 0x1a && len > 0 && pos + len <= data.length) {
+      return data.slice(pos, pos + len);
+    }
+    pos += len;
+  }
+  return null;
+}
+
+/**
+ * Play raw Int16 PCM audio data (16kHz mono) through the AudioContext.
+ */
+function playInt16PCM(int16Buffer) {
+  if (!audioCtx || audioCtx.state === 'closed') return;
+  const int16Data = new Int16Array(int16Buffer);
+  if (int16Data.length === 0) return;
+
+  // Convert Int16 to Float32 (normalize to [-1, 1])
+  const float32Data = new Float32Array(int16Data.length);
+  for (let i = 0; i < int16Data.length; i++) {
+    float32Data[i] = int16Data[i] / 32768;
+  }
+
+  // Resample from 16kHz to AudioContext sample rate
+  const upsampled = resample(float32Data, AUDIO_SAMPLE_RATE, audioCtx.sampleRate);
+  const audioBuffer = audioCtx.createBuffer(1, upsampled.length, audioCtx.sampleRate);
+  audioBuffer.getChannelData(0).set(upsampled);
+
+  const source = audioCtx.createBufferSource();
+  source.buffer = audioBuffer;
+  source.connect(audioCtx.destination);
+
+  // Schedule contiguous playback
+  const now = audioCtx.currentTime;
+  if (nextPlayTime < now) nextPlayTime = now;
+  source.start(nextPlayTime);
+  nextPlayTime += audioBuffer.duration;
+}
+
 function handleBinaryMessage(arrayBuffer) {
   const data = new Uint8Array(arrayBuffer);
 
@@ -796,30 +1072,35 @@ function handleBinaryMessage(arrayBuffer) {
       handleRTVIMessage(jsonStr);
       return;
     } catch (e) {
-      // If decoding fails, it might be corrupted or not actually an RTVI message
-      log('RTVI decode failed (0x22 prefix): ' + e.message + ' - treating as audio', 'error');
+      log('RTVI decode failed: ' + e.message + ' (' + data.length + ' bytes)', 'error');
     }
   }
 
-  // Treat as audio data (raw PCM Float32)
-  playAudio(arrayBuffer);
+  // Check if this is a protobuf audio frame (starts with 0x12)
+  if (data[0] === 0x12) {
+    const audioPayload = extractAudioFromFrame(data);
+    if (audioPayload && audioPayload.length >= 40) {
+      log('Audio frame: ' + audioPayload.length + ' bytes', 'audio');
+      playInt16PCM(audioPayload.buffer);
+      return;
+    }
+    log('Audio frame (no payload): ' + data.length + ' bytes', 'recv');
+    return;
+  }
+
+  // Unknown binary
+  log('Unknown binary: ' + data.length + ' bytes', 'recv');
 }
 
 function connectWebSocket() {
   const rawPhone = phoneInput.value.trim();
-  if (!rawPhone) {
-    log('Please enter a phone number', 'error');
-    return;
-  }
+  if (!rawPhone) { log('Please enter a phone number', 'error'); return; }
 
   setStatus('connecting');
-  log('Connecting to Pipecat server...', 'event');
-
-  // Build URL: wss://.../ws?phone={phone}&conv&conversation_id={uuid}
   const conversationId = crypto.randomUUID();
-  const url = WS_BASE_URL + '?phone=' + encodeURIComponent(rawPhone) +
+  const url = WS_URL + '?phone=' + encodeURIComponent(rawPhone) +
               '&conv&conversation_id=' + encodeURIComponent(conversationId);
-  log('WebSocket URL: ' + url, 'event');
+  log('Connecting to Pipecat server...', 'event');
 
   ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
@@ -832,31 +1113,25 @@ function connectWebSocket() {
     const encoded = encodeMessage(readyMsg);
     ws.send(encoded.buffer);
 
-    // Start heartbeat keepalive
+    // Note: No silence keepalive here. The server stays alive waiting for
+    // actual user audio. Sending zero frames triggers STT on silence and
+    // causes the server to close after processing a "silent turn."
+
+    // Heartbeat keepalive (RTVI ping every 15s)
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     heartbeatTimer = setInterval(() => {
       if (ws && ws.readyState === WebSocket.OPEN) {
-        // Send a lightweight RTVI message as keepalive
         try {
-          const pingMsg = createRTVIMessage('ping', { timestamp: Date.now() });
-          const encodedPing = encodeMessage(pingMsg);
-          ws.send(encodedPing.buffer);
-        } catch (e) { /* ignore heartbeat errors */ }
+          ws.send(encodeMessage(createRTVIMessage('ping', { timestamp: Date.now() })).buffer);
+        } catch (e) { /* ignore */ }
       }
-    }, 30000);
-
-    // Send initial silence to kickstart audio pipeline
-    const silence = new Float32Array(1600); // 100ms at 16kHz
-    silence.fill(0);
-    ws.send(silence.buffer);
-    log('Sent initial silence for audio activation', 'audio');
+    }, 15000);
   };
 
   ws.onmessage = function (event) {
     if (event.data instanceof ArrayBuffer) {
       handleBinaryMessage(event.data);
     } else if (typeof event.data === 'string') {
-      // Text messages - try parsing as JSON
       try {
         const msg = JSON.parse(event.data);
         log('[R text] ' + JSON.stringify(msg).substring(0, 300), 'recv');
@@ -876,7 +1151,12 @@ function connectWebSocket() {
 
   ws.onclose = function (event) {
     log('WebSocket closed: code=' + event.code + ' reason=' + (event.reason || 'none'), 'event');
+    stopSilenceGenerator();
     if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    // Clear speaking indicator
+    isBotSpeaking = false;
+    if (speakingIndicator) speakingIndicator.style.display = 'none';
+    // Only stop mic capture, don't destroy AudioContext — TTS audio may still be queued
     stopAudioCapture();
     if (currentStatus !== 'error') {
       setStatus('disconnected');
@@ -903,7 +1183,7 @@ function disconnectWebSocket() {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.close(1000, 'User disconnected');
     }
-    stopAudioCapture();
+    cleanupAudio();
     setStatus('disconnected');
   }, 300);
 }
@@ -914,17 +1194,34 @@ function disconnectWebSocket() {
 
 async function toggleConnection() {
   if (currentStatus === 'disconnected' || currentStatus === 'error') {
-    // Connect flow
+    // Connect flow: mic capture first, then WebSocket.
     try {
       await startAudioCapture();
       connectWebSocket();
+
+      // Wait for WS to open and exchange initial messages
+      await new Promise((resolve, reject) => {
+        if (!ws) { reject(new Error('WebSocket not created')); return; }
+        ws.addEventListener('open', () => resolve(), { once: true });
+        ws.addEventListener('error', () => reject(new Error('WebSocket connection failed')), { once: true });
+        setTimeout(() => reject(new Error('WebSocket connection timeout')), 15000);
+      });
+
+      // Small delay to allow server to process client-ready
+      await new Promise(r => setTimeout(r, 100));
+      // Guard: connection may have closed during the delay
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        throw new Error('Connection lost before two-way audio was ready');
+      }
+      log('Connected - two-way audio ready', 'event');
     } catch (e) {
       log('Failed to start: ' + e.message, 'error');
       if (e.name === 'NotAllowedError') {
         log('Microphone permission was denied. Please allow mic access and try again.', 'error');
       }
       setStatus('error');
-      stopAudioCapture();
+      cleanupAudio();
+      if (ws) { try { ws.close(); } catch(ex) {} ws = null; }
     }
   } else if (currentStatus === 'connected') {
     // Disconnect flow
@@ -942,7 +1239,7 @@ function init() {
 
   log('Pipecat AI Client initialized', 'event');
   log('Browser: ' + navigator.userAgent, 'event');
-  log('Protocol: RTVI over WebSocket, Audio: PCM Float32 16kHz mono', 'event');
+  log('Protocol: RTVI over WebSocket, Audio: Int16 PCM 16kHz mono', 'event');
   setStatus('disconnected');
 }
 
