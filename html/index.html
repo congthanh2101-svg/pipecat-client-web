@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<!--
+  Pipecat AI Client - RTVI WebSocket Interface
+  =============================================
+  A self-contained HTML client for connecting to Pipecat AI Server via WebSocket
+  using the RTVI (Real-Time Voice Interface) protocol.
+
+  Protocol: Binary protobuf-like encoding over WebSocket
+  Audio:    Raw PCM Float32, 16000 Hz, mono (both directions)
+
+  Usage:
+    1. Open this file in a modern browser (Chrome/Edge recommended)
+    2. Enter a phone number (default: 0909835115)
+    3. Click Connect
+    4. Grant microphone permission when prompted
+    5. Speak - bot audio and transcriptions will appear
+
+  Requirements:
+    - Modern browser with WebSocket, Web Audio API, and getUserMedia support
+    - Microphone access
+    - Network access to the Pipecat WebSocket server
+
+  Note: The Pipecat server must allow CORS for the WebSocket connection.
+        If serving this file from a different origin, ensure the server
+        accepts the Origin header in the WebSocket handshake.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pipecat AI Client</title>
+<style>
+  /* ===== Reset & Base ===== */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+    background: #0f0f1a;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ===== Header ===== */
+  .header {
+    background: linear-gradient(135deg, #1a1a4e 0%, #2d1b69 30%, #1a3a5c 70%, #0d2137 100%);
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    flex-shrink: 0;
+  }
+  .header-logo {
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 700; color: #fff;
+    flex-shrink: 0;
+  }
+  .header h1 {
+    font-size: 1.2rem; font-weight: 600;
+    letter-spacing: 0.02em;
+    background: linear-gradient(90deg, #c4b5fd, #a5b4fc);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* ===== Status Bar ===== */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 24px;
+    background: #14142b;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .status-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  .status-dot.disconnected { background: #6b7280; box-shadow: none; }
+  .status-dot.connecting   { background: #f59e0b; box-shadow: 0 0 8px #f59e0b88; animation: pulse 1.2s ease-in-out infinite; }
+  .status-dot.connected    { background: #22c55e; box-shadow: 0 0 10px #22c55e88; }
+  .status-dot.error        { background: #ef4444; box-shadow: 0 0 10px #ef444488; animation: pulse 0.8s ease-in-out infinite; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  .status-text {
+    font-size: 0.85rem; font-weight: 500; color: #9ca3af;
+  }
+
+  /* ===== Controls ===== */
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 24px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .controls label {
+    font-size: 0.8rem; color: #9ca3af; font-weight: 500;
+  }
+  .controls input[type="text"] {
+    background: #1e1e38;
+    border: 1px solid #2d2d50;
+    border-radius: 8px;
+    color: #e0e0e0;
+    padding: 9px 14px;
+    font-size: 0.9rem;
+    width: 200px;
+    outline: none;
+    transition: border-color 0.2s;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  }
+  .controls input[type="text"]:focus {
+    border-color: #6366f1;
+  }
+
+  .btn {
+    padding: 10px 22px;
+    border: none; border-radius: 8px;
+    font-size: 0.9rem; font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
+    letter-spacing: 0.02em;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-connect {
+    background: linear-gradient(135deg, #16a34a, #22c55e);
+    color: #fff;
+    box-shadow: 0 2px 10px rgba(34,197,94,0.3);
+  }
+  .btn-connect:hover { background: linear-gradient(135deg, #15803d, #16a34a); }
+  .btn-connect:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-disconnect {
+    background: linear-gradient(135deg, #dc2626, #ef4444);
+    color: #fff;
+    box-shadow: 0 2px 10px rgba(239,68,68,0.3);
+  }
+  .btn-disconnect:hover { background: linear-gradient(135deg, #b91c1c, #dc2626); }
+  .btn-clear {
+    background: #2d2d50; color: #9ca3af;
+    padding: 8px 16px; font-size: 0.8rem;
+  }
+  .btn-clear:hover { background: #3d3d60; color: #d1d5db; }
+
+  /* ===== Main Content ===== */
+  .main-content {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    gap: 1px;
+    background: #1a1a3a;
+  }
+
+  /* ===== Transcript Panel ===== */
+  .transcript-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: #14142b;
+    min-width: 200px;
+  }
+  .panel-header {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6b7280;
+    padding: 10px 16px;
+    background: rgba(255,255,255,0.03);
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    font-weight: 600;
+  }
+  .transcript-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .transcript-body::-webkit-scrollbar { width: 6px; }
+  .transcript-body::-webkit-scrollbar-track { background: transparent; }
+  .transcript-body::-webkit-scrollbar-thumb { background: #3d3d60; border-radius: 3px; }
+
+  .transcript-msg {
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    line-height: 1.45;
+    animation: fadeIn 0.2s ease;
+    max-width: 85%;
+    word-break: break-word;
+  }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .transcript-msg.user {
+    align-self: flex-end;
+    background: linear-gradient(135deg, #2563eb, #3b82f6);
+    color: #fff;
+    border-bottom-right-radius: 3px;
+  }
+  .transcript-msg.bot {
+    align-self: flex-start;
+    background: #1e1e38;
+    color: #d1d5db;
+    border: 1px solid #2d2d50;
+    border-bottom-left-radius: 3px;
+  }
+  .transcript-empty {
+    color: #4b5563;
+    font-style: italic;
+    text-align: center;
+    padding: 40px 20px;
+    font-size: 0.85rem;
+  }
+
+  /* ===== Debug Panel ===== */
+  .debug-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: #0a0a1e;
+    min-width: 250px;
+    border-left: 1px solid rgba(255,255,255,0.05);
+  }
+  .debug-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 16px;
+    background: rgba(255,255,255,0.03);
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+  .debug-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 14px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.75rem;
+    line-height: 1.6;
+    color: #9ca3af;
+  }
+  .debug-body::-webkit-scrollbar { width: 6px; }
+  .debug-body::-webkit-scrollbar-track { background: transparent; }
+  .debug-body::-webkit-scrollbar-thumb { background: #2d2d50; border-radius: 3px; }
+  .debug-entry {
+    padding: 2px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.02);
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .debug-entry .ts { color: #6366f1; }
+  .debug-entry.dir-send { color: #34d399; }
+  .debug-entry.dir-recv { color: #fbbf24; }
+  .debug-entry.dir-event { color: #60a5fa; }
+  .debug-entry.dir-error { color: #f87171; }
+  .debug-entry.dir-audio { color: #c084fc; }
+
+  /* ===== Responsive ===== */
+  @media (max-width: 768px) {
+    .main-content { flex-direction: column; }
+    .debug-panel { border-left: none; border-top: 1px solid rgba(255,255,255,0.05); max-height: 40vh; }
+    .transcript-panel { max-height: 40vh; }
+    .controls { flex-direction: column; align-items: flex-start; }
+    .controls input[type="text"] { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+  <div class="header-logo">P</div>
+  <h1>Pipecat AI Client</h1>
+</header>
+
+<!-- Status Bar -->
+<div class="status-bar">
+  <div class="status-dot disconnected" id="statusDot"></div>
+  <span class="status-text" id="statusText">Disconnected</span>
+</div>
+
+<!-- Controls -->
+<div class="controls">
+  <label for="phoneInput">Phone:</label>
+  <input type="text" id="phoneInput" value="0909835115" placeholder="Enter phone number">
+  <button class="btn btn-connect" id="connectBtn" onclick="toggleConnection()">Connect</button>
+</div>
+
+<!-- Main Content -->
+<div class="main-content">
+  <!-- Conversation Transcript -->
+  <section class="transcript-panel">
+    <div class="panel-header">Conversation Transcript</div>
+    <div class="transcript-body" id="transcriptBody">
+      <div class="transcript-empty">Transcriptions will appear here...</div>
+    </div>
+  </section>
+
+  <!-- Debug Log -->
+  <section class="debug-panel">
+    <div class="debug-header-row">
+      <span class="panel-header" style="padding:0;border:none;background:none;">Debug Log</span>
+      <button class="btn btn-clear" onclick="clearLog()">Clear</button>
+    </div>
+    <div class="debug-body" id="debugBody"></div>
+  </section>
+</div>
+
+<script>
+// ============================================================================
+//  Pipecat AI Client - JavaScript
+// ============================================================================
+
+// ---- DOM References ----
+const phoneInput = document.getElementById('phoneInput');
+const connectBtn = document.getElementById('connectBtn');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const debugBody = document.getElementById('debugBody');
+const transcriptBody = document.getElementById('transcriptBody');
+
+// ---- Constants ----
+const WS_BASE_URL = 'wss://aeon-pipecat.securityzone.vn/ws';
+const AUDIO_SAMPLE_RATE = 16000;
+const MAX_LOG_ENTRIES = 300;
+
+// ---- State ----
+let ws = null;
+let currentStatus = 'disconnected'; // disconnected | connecting | connected | error
+let audioCtx = null;
+let micStream = null;
+let micSourceNode = null;
+let micProcessorNode = null;   // ScriptProcessorNode or AudioWorkletNode
+let nextPlayTime = 0;
+let transcriptEmpty = null;    // reference to empty-state div, removed on first message
+
+// ============================================================================
+//  SECTION 1: Varint & Binary Message Encoding/Decoding
+// ============================================================================
+
+/**
+ * Encode an unsigned integer as a protobuf-style varint.
+ * Each byte uses 7 bits for data and the MSB as a continuation flag.
+ */
+function encodeVarint(value) {
+  const bytes = [];
+  while (value > 127) {
+    bytes.push((value & 127) | 128);
+    value >>>= 7;
+  }
+  bytes.push(value & 127);
+  return bytes;
+}
+
+/**
+ * Encode a JSON string into the RTVI binary message format:
+ *   [0x22] [outer_len: varint] [0x0A] [inner_len: varint] [JSON UTF-8 bytes]
+ */
+function encodeMessage(jsonStr) {
+  const encoder = new TextEncoder();
+  const jsonBytes = encoder.encode(jsonStr);
+  const jsonLen = jsonBytes.length;
+
+  const innerLenVarint = encodeVarint(jsonLen);
+  // outer_len covers: 1 (the 0x0A tag) + inner_len_varint bytes + json bytes
+  const outerLen = 1 + innerLenVarint.length + jsonLen;
+  const outerLenVarint = encodeVarint(outerLen);
+
+  const totalLen = 1 + outerLenVarint.length + 1 + innerLenVarint.length + jsonLen;
+  const msg = new Uint8Array(totalLen);
+  let offset = 0;
+
+  msg[offset++] = 0x22;
+  for (let i = 0; i < outerLenVarint.length; i++) msg[offset++] = outerLenVarint[i];
+  msg[offset++] = 0x0A;
+  for (let i = 0; i < innerLenVarint.length; i++) msg[offset++] = innerLenVarint[i];
+  msg.set(jsonBytes, offset);
+
+  return msg;
+}
+
+/**
+ * Decode an RTVI binary message back to a JSON string.
+ * Expects format: [0x22] [outer_len: varint] [0x0A] [inner_len: varint] [JSON UTF-8 bytes]
+ * Throws on invalid format.
+ */
+function decodeMessage(data) {
+  if (data[0] !== 0x22) throw new Error('Missing outer tag 0x22');
+
+  let offset = 1;
+  // Skip outer_len varint
+  let outerLen = 0, shift = 0;
+  while (offset < data.length) {
+    const byte = data[offset++];
+    outerLen |= (byte & 127) << shift;
+    shift += 7;
+    if (!(byte & 128)) break;
+  }
+
+  if (offset >= data.length || data[offset] !== 0x0A) {
+    throw new Error('Missing inner tag 0x0A at offset ' + offset);
+  }
+  offset++;
+
+  // Read inner_len varint (JSON length)
+  let jsonLen = 0;
+  shift = 0;
+  while (offset < data.length) {
+    const byte = data[offset++];
+    jsonLen |= (byte & 127) << shift;
+    shift += 7;
+    if (!(byte & 128)) break;
+  }
+
+  if (offset + jsonLen > data.length) {
+    throw new Error('JSON length ' + jsonLen + ' exceeds remaining data (' + (data.length - offset) + ')');
+  }
+
+  const jsonBytes = data.subarray(offset, offset + jsonLen);
+  return new TextDecoder().decode(jsonBytes);
+}
+
+// ============================================================================
+//  SECTION 2: RTVI Message Helpers
+// ============================================================================
+
+function shortUuid() {
+  return crypto.randomUUID().slice(0, 8);
+}
+
+function createRTVIMessage(type, data) {
+  return JSON.stringify({ label: 'rtvi-ai', type: type, data: data, id: shortUuid() });
+}
+
+function createClientReadyMsg() {
+  const isChrome = navigator.userAgent.indexOf('Chrome') !== -1 && navigator.userAgent.indexOf('Edg') === -1;
+  const isEdge = navigator.userAgent.indexOf('Edg') !== -1;
+  let browserName = 'Other';
+  if (isChrome) browserName = 'Chrome';
+  else if (isEdge) browserName = 'Edge';
+  else if (navigator.userAgent.indexOf('Firefox') !== -1) browserName = 'Firefox';
+  else if (navigator.userAgent.indexOf('Safari') !== -1) browserName = 'Safari';
+
+  const about = {
+    library: 'pipecat-client-web',
+    library_version: '1.0.0',
+    platform_details: {
+      browser: browserName,
+      platform_type: /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop'
+    }
+  };
+  return createRTVIMessage('client-ready', { version: '1.0.0', about: about });
+}
+
+// ============================================================================
+//  SECTION 3: Debug Logging
+// ============================================================================
+
+function log(msg, direction) {
+  const timestamp = new Date().toISOString();
+
+  // Manage max entries
+  while (debugBody.children.length >= MAX_LOG_ENTRIES) {
+    debugBody.removeChild(debugBody.firstChild);
+  }
+
+  const entry = document.createElement('div');
+  entry.className = 'debug-entry';
+  if (direction) entry.classList.add('dir-' + direction);
+
+  const tsSpan = document.createElement('span');
+  tsSpan.className = 'ts';
+  tsSpan.textContent = timestamp;
+
+  entry.appendChild(tsSpan);
+  entry.appendChild(document.createTextNode(' - ' + msg));
+  debugBody.appendChild(entry);
+  debugBody.scrollTop = debugBody.scrollHeight;
+}
+
+function clearLog() {
+  debugBody.innerHTML = '';
+  log('Log cleared');
+}
+
+// ============================================================================
+//  SECTION 4: Status Management
+// ============================================================================
+
+function setStatus(status) {
+  currentStatus = status;
+  statusDot.className = 'status-dot ' + status;
+
+  const labels = {
+    disconnected: 'Disconnected',
+    connecting: 'Connecting...',
+    connected: 'Connected',
+    error: 'Error'
+  };
+  statusText.textContent = labels[status] || status;
+
+  // Update button
+  if (status === 'connected') {
+    connectBtn.textContent = 'Disconnect';
+    connectBtn.className = 'btn btn-disconnect';
+    connectBtn.disabled = false;
+  } else if (status === 'connecting') {
+    connectBtn.textContent = 'Connecting...';
+    connectBtn.disabled = true;
+  } else {
+    connectBtn.textContent = 'Connect';
+    connectBtn.className = 'btn btn-connect';
+    connectBtn.disabled = (status === 'connecting');
+  }
+}
+
+// ============================================================================
+//  SECTION 5: Transcript
+// ============================================================================
+
+function addTranscript(text, speaker) {
+  // Remove empty-state message on first real transcript
+  if (transcriptEmpty) {
+    transcriptEmpty.remove();
+    transcriptEmpty = null;
+  }
+
+  const msgDiv = document.createElement('div');
+  msgDiv.className = 'transcript-msg ' + speaker;
+  msgDiv.textContent = text;
+  transcriptBody.appendChild(msgDiv);
+  transcriptBody.scrollTop = transcriptBody.scrollHeight;
+}
+
+// ============================================================================
+//  SECTION 6: Audio Resampling
+// ============================================================================
+
+/**
+ * Resample audio data using linear interpolation.
+ * @param {Float32Array} buffer - Input audio samples
+ * @param {number} inputRate - Source sample rate
+ * @param {number} outputRate - Target sample rate
+ * @returns {Float32Array} Resampled audio
+ */
+function resample(buffer, inputRate, outputRate) {
+  if (inputRate === outputRate) return new Float32Array(buffer);
+
+  const ratio = inputRate / outputRate;
+  const newLength = Math.floor(buffer.length / ratio);
+  const result = new Float32Array(newLength);
+
+  for (let i = 0; i < newLength; i++) {
+    const srcIndex = i * ratio;
+    const srcFloor = Math.floor(srcIndex);
+    const srcCeil = Math.min(srcFloor + 1, buffer.length - 1);
+    const t = srcIndex - srcFloor;
+    result[i] = buffer[srcFloor] * (1 - t) + buffer[srcCeil] * t;
+  }
+  return result;
+}
+
+// ============================================================================
+//  SECTION 7: Audio Playback
+// ============================================================================
+
+function playAudio(arrayBuffer) {
+  if (!audioCtx || audioCtx.state === 'closed') return;
+
+  const float32Data = new Float32Array(arrayBuffer);
+  if (float32Data.length === 0) return;
+
+  // Resample from 16000 Hz to AudioContext sample rate for playback
+  const upsampled = resample(float32Data, AUDIO_SAMPLE_RATE, audioCtx.sampleRate);
+
+  const audioBuffer = audioCtx.createBuffer(1, upsampled.length, audioCtx.sampleRate);
+  audioBuffer.getChannelData(0).set(upsampled);
+
+  const source = audioCtx.createBufferSource();
+  source.buffer = audioBuffer;
+  source.connect(audioCtx.destination);
+
+  // Schedule contiguous playback
+  const now = audioCtx.currentTime;
+  if (nextPlayTime < now) nextPlayTime = now;
+  source.start(nextPlayTime);
+  nextPlayTime += audioBuffer.duration;
+}
+
+// ============================================================================
+//  SECTION 8: Audio Capture
+// ============================================================================
+
+const AUDIOWORKLET_CAPTURE_CODE = `
+class MicCaptureProcessor extends AudioWorkletProcessor {
+  process(inputs, outputs, parameters) {
+    const input = inputs[0];
+    if (input && input.length > 0 && input[0]) {
+      // Copy the channel data (cannot transfer the browser-owned buffer)
+      const copy = new Float32Array(input[0]);
+      this.port.postMessage(copy);
+    }
+    return true;
+  }
+}
+registerProcessor('mic-capture', MicCaptureProcessor);
+`;
+
+async function startAudioCapture() {
+  // Request microphone
+  micStream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      channelCount: 1,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true
+    }
+  });
+  log('Microphone access granted', 'event');
+
+  // Create AudioContext
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  log('AudioContext created, sample rate: ' + audioCtx.sampleRate + ' Hz', 'event');
+  nextPlayTime = audioCtx.currentTime;
+
+  micSourceNode = audioCtx.createMediaStreamSource(micStream);
+
+  // Try AudioWorklet first, fall back to ScriptProcessorNode
+  let useWorklet = false;
+  if (audioCtx.audioWorklet && typeof AudioWorkletNode !== 'undefined') {
+    try {
+      const blob = new Blob([AUDIOWORKLET_CAPTURE_CODE], { type: 'application/javascript' });
+      const workletUrl = URL.createObjectURL(blob);
+      await audioCtx.audioWorklet.addModule(workletUrl);
+      URL.revokeObjectURL(workletUrl);
+
+      const workletNode = new AudioWorkletNode(audioCtx, 'mic-capture');
+      workletNode.port.onmessage = (event) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        const inputData = event.data; // Float32Array at AudioContext sample rate
+        const downsampled = resample(inputData, audioCtx.sampleRate, AUDIO_SAMPLE_RATE);
+        ws.send(downsampled.buffer);
+      };
+      micSourceNode.connect(workletNode);
+      // AudioWorkletNode does not need to connect to destination for capture-only
+      micProcessorNode = workletNode;
+      useWorklet = true;
+      log('Audio capture: AudioWorklet', 'audio');
+    } catch (e) {
+      log('AudioWorklet failed: ' + e.message + ', falling back to ScriptProcessor', 'error');
+    }
+  }
+
+  if (!useWorklet) {
+    // Fallback: ScriptProcessorNode (deprecated but widely supported)
+    const bufferSize = 4096;
+    const scriptNode = audioCtx.createScriptProcessor(bufferSize, 1, 1);
+    scriptNode.onaudioprocess = (event) => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const inputData = event.inputBuffer.getChannelData(0);
+      const downsampled = resample(inputData, audioCtx.sampleRate, AUDIO_SAMPLE_RATE);
+      ws.send(downsampled.buffer);
+    };
+    micSourceNode.connect(scriptNode);
+    scriptNode.connect(audioCtx.destination); // Required for ScriptProcessor to fire
+    micProcessorNode = scriptNode;
+    log('Audio capture: ScriptProcessorNode (buffer=' + bufferSize + ')', 'audio');
+  }
+}
+
+function stopAudioCapture() {
+  // Disconnect and clean up
+  if (micProcessorNode) {
+    try { micProcessorNode.disconnect(); } catch (e) { /* ignore */ }
+    micProcessorNode = null;
+  }
+  if (micSourceNode) {
+    try { micSourceNode.disconnect(); } catch (e) { /* ignore */ }
+    micSourceNode = null;
+  }
+  if (micStream) {
+    micStream.getTracks().forEach(track => track.stop());
+    micStream = null;
+    log('Microphone released', 'event');
+  }
+  if (audioCtx && audioCtx.state !== 'closed') {
+    audioCtx.close().catch(() => {});
+    audioCtx = null;
+    log('AudioContext closed', 'event');
+  }
+  nextPlayTime = 0;
+}
+
+// ============================================================================
+//  SECTION 9: WebSocket & RTVI Message Handling
+// ============================================================================
+
+function handleRTVIMessage(jsonStr) {
+  let msg;
+  try {
+    msg = JSON.parse(jsonStr);
+  } catch (e) {
+    log('Failed to parse RTVI JSON: ' + e.message, 'error');
+    return;
+  }
+
+  if (msg.label !== 'rtvi-ai') return;
+
+  log('[R] ' + msg.type + (msg.data ? ' ' + JSON.stringify(msg.data).substring(0, 200) : ''), 'recv');
+
+  switch (msg.type) {
+    case 'bot-ready':
+      log('Bot is ready - connection established', 'event');
+      setStatus('connected');
+      break;
+
+    case 'user-transcription':
+      if (msg.data && msg.data.text) {
+        addTranscript(msg.data.text, 'user');
+      }
+      break;
+
+    case 'bot-output':
+      // Bot text output - can be transcription or other text
+      if (msg.data && msg.data.text) {
+        addTranscript(msg.data.text, 'bot');
+      }
+      break;
+
+    case 'bot-started-speaking':
+      log('Bot started speaking', 'event');
+      break;
+
+    case 'bot-stopped-speaking':
+      log('Bot stopped speaking', 'event');
+      break;
+
+    case 'error':
+      log('Server error: ' + JSON.stringify(msg.data), 'error');
+      break;
+
+    default:
+      // Other message types are logged but not specifically handled
+      break;
+  }
+}
+
+function handleBinaryMessage(arrayBuffer) {
+  const data = new Uint8Array(arrayBuffer);
+
+  // Check if this is an RTVI protocol message (starts with 0x22)
+  if (data.length > 0 && data[0] === 0x22) {
+    try {
+      const jsonStr = decodeMessage(data);
+      handleRTVIMessage(jsonStr);
+      return;
+    } catch (e) {
+      // If decoding fails, it might be corrupted or not actually an RTVI message
+      log('RTVI decode failed (0x22 prefix): ' + e.message + ' - treating as audio', 'error');
+    }
+  }
+
+  // Treat as audio data (raw PCM Float32)
+  playAudio(arrayBuffer);
+}
+
+function connectWebSocket() {
+  const rawPhone = phoneInput.value.trim();
+  if (!rawPhone) {
+    log('Please enter a phone number', 'error');
+    return;
+  }
+
+  setStatus('connecting');
+  log('Connecting to Pipecat server...', 'event');
+
+  // Build URL: wss://.../ws?phone={phone}&conv&conversation_id={uuid}
+  const conversationId = crypto.randomUUID();
+  const url = WS_BASE_URL + '?phone=' + encodeURIComponent(rawPhone) +
+              '&conv&conversation_id=' + encodeURIComponent(conversationId);
+  log('WebSocket URL: ' + url, 'event');
+
+  ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = function () {
+    log('WebSocket connected', 'event');
+    // Send client-ready immediately
+    const readyMsg = createClientReadyMsg();
+    log('[S] client-ready', 'send');
+    const encoded = encodeMessage(readyMsg);
+    ws.send(encoded.buffer);
+  };
+
+  ws.onmessage = function (event) {
+    if (event.data instanceof ArrayBuffer) {
+      handleBinaryMessage(event.data);
+    } else if (typeof event.data === 'string') {
+      // Text messages - try parsing as JSON
+      try {
+        const msg = JSON.parse(event.data);
+        log('[R text] ' + JSON.stringify(msg).substring(0, 300), 'recv');
+        if (msg.label === 'rtvi-ai') {
+          handleRTVIMessage(JSON.stringify(msg));
+        }
+      } catch (e) {
+        log('[R text] ' + event.data.substring(0, 300), 'recv');
+      }
+    }
+  };
+
+  ws.onerror = function (err) {
+    log('WebSocket error', 'error');
+    setStatus('error');
+  };
+
+  ws.onclose = function (event) {
+    log('WebSocket closed: code=' + event.code + ' reason=' + (event.reason || 'none'), 'event');
+    stopAudioCapture();
+    if (currentStatus !== 'error') {
+      setStatus('disconnected');
+    }
+    ws = null;
+  };
+}
+
+function disconnectWebSocket() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+  log('Sending disconnect-bot...', 'event');
+  try {
+    const disconnectMsg = createRTVIMessage('disconnect-bot', {});
+    log('[S] disconnect-bot', 'send');
+    const encoded = encodeMessage(disconnectMsg);
+    ws.send(encoded.buffer);
+  } catch (e) {
+    log('Error sending disconnect-bot: ' + e.message, 'error');
+  }
+
+  // Close after a short delay to allow message to be sent
+  setTimeout(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.close(1000, 'User disconnected');
+    }
+    stopAudioCapture();
+    setStatus('disconnected');
+  }, 300);
+}
+
+// ============================================================================
+//  SECTION 10: Connect/Disconnect Toggle
+// ============================================================================
+
+async function toggleConnection() {
+  if (currentStatus === 'disconnected' || currentStatus === 'error') {
+    // Connect flow
+    try {
+      await startAudioCapture();
+      connectWebSocket();
+    } catch (e) {
+      log('Failed to start: ' + e.message, 'error');
+      if (e.name === 'NotAllowedError') {
+        log('Microphone permission was denied. Please allow mic access and try again.', 'error');
+      }
+      setStatus('error');
+      stopAudioCapture();
+    }
+  } else if (currentStatus === 'connected') {
+    // Disconnect flow
+    disconnectWebSocket();
+  }
+}
+
+// ============================================================================
+//  SECTION 11: Initialize
+// ============================================================================
+
+function init() {
+  // Cache the empty-state element for transcript
+  transcriptEmpty = transcriptBody.querySelector('.transcript-empty');
+
+  log('Pipecat AI Client initialized', 'event');
+  log('Browser: ' + navigator.userAgent, 'event');
+  log('Protocol: RTVI over WebSocket, Audio: PCM Float32 16kHz mono', 'event');
+  setStatus('disconnected');
+}
+
+// Start when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
+</script>
+</body>
+</html>

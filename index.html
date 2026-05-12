@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pipecat AI Client - So sánh Approaches</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .container { max-width: 1000px; padding: 40px 20px; text-align: center; }
+  h1 {
+    font-size: 2.5em;
+    background: linear-gradient(135deg, #6c5ce7, #00d4aa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 10px;
+  }
+  .subtitle { color: #8892b0; font-size: 1.1em; margin-bottom: 40px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 24px;
+    margin: 30px 0;
+  }
+  .card {
+    background: #1a1a2e;
+    border: 1px solid #2a2a4a;
+    border-radius: 16px;
+    padding: 30px;
+    transition: transform 0.2s, box-shadow 0.2s;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    text-align: left;
+  }
+  .card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 12px 40px rgba(108,92,231,0.2);
+    border-color: #6c5ce7;
+  }
+  .card .tag {
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: 0.75em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 14px;
+  }
+  .tag-a { background: #00d4aa; color: #000; }
+  .tag-b { background: #ff6b35; color: #fff; }
+  .tag-c { background: #4dabf7; color: #000; }
+  .card h2 { margin-bottom: 10px; font-size: 1.3em; }
+  .card p { color: #8892b0; font-size: 0.9em; line-height: 1.6; margin-bottom: 16px; }
+  .card .stats { font-size: 0.85em; color: #6c5ce7; }
+  .card .stats span { display: inline-block; margin-right: 16px; }
+  .footer { margin-top: 40px; color: #4a5568; font-size: 0.85em; }
+  .footer a { color: #6c5ce7; text-decoration: none; }
+  .plan-link { display: inline-block; margin-top: 20px; color: #6c5ce7; text-decoration: none; border: 1px solid #6c5ce7; padding: 8px 20px; border-radius: 8px; font-size: 0.9em; transition: background 0.2s; }
+  .plan-link:hover { background: #6c5ce7; color: #fff; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Pipecat AI Client</h1>
+  <p class="subtitle">RTVI WebSocket Interface — Chọn phiên bản để trải nghiệm</p>
+
+  <div class="grid">
+    <a href="/ac/pipecat-client-web/html/" class="card">
+      <span class="tag tag-a">A - HTML thuần</span>
+      <h2>HTML thuần + JavaScript</h2>
+      <p>Một file HTML duy nhất, không dependencies, không cần build. Deploy ngay lập tức bằng cách copy file.</p>
+      <div class="stats">
+        <span>📄 1 file</span>
+        <span>⚡ Tức thì</span>
+        <span>📦 ~15KB</span>
+      </div>
+    </a>
+
+    <a href="/ac/pipecat-client-web/react/" class="card">
+      <span class="tag tag-b">B - React</span>
+      <h2>React + Vite + TypeScript</h2>
+      <p>React app đầy đủ với component architecture, dễ mở rộng và maintain.</p>
+      <div class="stats">
+        <span>⚛️ React 18</span>
+        <span>📦 152KB JS</span>
+        <span>🔧 Cần build</span>
+      </div>
+    </a>
+
+    <a href="/ac/pipecat-client-web/vite/" class="card">
+      <span class="tag tag-c">C - Vite Vanilla</span>
+      <h2>Vanilla JS + Vite + TypeScript</h2>
+      <p>Gọn nhẹ với TypeScript và Vite. Bundle siêu nhỏ, khởi tạo nhanh.</p>
+      <div class="stats">
+        <span>📦 9.7KB JS</span>
+        <span>🔧 Cần build</span>
+        <span>⚡ Fast refresh</span>
+      </div>
+    </a>
+  </div>
+
+  <a href="/ac/pipecat-client-web/pipecat-ai-plan.html" class="plan-link">📋 Xem kế hoạch chi tiết</a>
+
+  <div class="footer">
+    <p>Pipecat Client Web &mdash; <a href="https://github.com/pipecat-ai/pipecat-client-web">GitHub</a></p>
+    <p>WebSocket: <code>wss://aeon-pipecat.securityzone.vn/ws</code> &bull; RTVI Protocol v1.0</p>
+  </div>
+</div>
+</body>
+</html>

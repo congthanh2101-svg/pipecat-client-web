@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pipecat AI Client</title>
+  <script type="module" src="/src/main.ts"></script>
+</head>
+<body>
+  <div class="app-container">
+    <header class="app-header">
+      <h1>Pipecat AI Client</h1>
+      <div class="subtitle">Real-time voice AI via WebSocket (RTVI protocol)</div>
+    </header>
+
+    <div class="main-grid">
+      <!-- Left column -->
+      <div>
+        <div class="card">
+          <div class="card-title">Connection</div>
+          <div class="form-group">
+            <label for="phone-input">Phone Number</label>
+            <input type="text" id="phone-input" placeholder="Enter phone number" autocomplete="off" />
+          </div>
+          <div class="form-group">
+            <label for="conversation-id">Conversation ID</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="conversation-id" readonly style="flex: 1;" />
+              <button id="btn-new-conv" class="btn btn-clear">New</button>
+            </div>
+          </div>
+          <button id="btn-connect" class="btn btn-connect">Connect</button>
+          <div class="status-row">
+            <span id="status-indicator" class="status-dot status-red"></span>
+            <span id="status-text" class="status-text">Disconnected</span>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top: 20px;">
+          <div class="card-title">Conversation</div>
+          <div id="transcript" class="transcript-container">
+            <div style="color: #4a5568; text-align: center; padding-top: 80px;">
+              Connect to start a conversation
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right column -->
+      <div>
+        <div class="card">
+          <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>Debug Log</span>
+            <button id="btn-clear" class="btn btn-clear">Clear</button>
+          </div>
+          <div id="debug-log" class="debug-container"></div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="app-footer">
+      Pipecat Client Web &mdash; Approach C (Vite + Vanilla TypeScript)
+    </footer>
+  </div>
+</body>
+</html>
