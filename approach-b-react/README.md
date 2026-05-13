@@ -1,52 +1,35 @@
 # Approach B: React App (Vite + React + TypeScript)
 
-Giao dien ket noi toi Pipecat AI Server qua WebSocket voi giao thuc RTVI.
+Giao diện kết nối tới Pipecat AI Server qua WebSocket sử dụng giao thức RTVI, xây dựng với React + Vite + TypeScript.
 
-## Mo ta Approach
+## Công nghệ sử dụng
 
-Day la ung dung React su dung WebSocket truc tiep de giao tiep voi Pipecat AI Server. Khong su dung thu vien `@pipecat-ai/client-js` cho transport -- thay vao do, tu implement toan bo giao thuc RTVI bao gom:
+- **Vite** 5 — Build tool
+- **React** 18 — UI library
+- **TypeScript** 5 — Type safety
+- **@pipecat-ai/client-js** ^1.8.0 — Pipecat Client SDK
+- **Web Audio API** — Audio capture and playback
 
-- **Ma hoa/giai ma binary message** theo dinh dang Protobuf-like cua Pipecat
-- **Quan ly WebSocket** va cac message RTVI (client-ready, bot-ready, disconnect-bot)
-- **Xu ly audio** truc tiep qua WebRTC getUserMedia va AudioContext
+## Yêu cầu hệ thống
 
-### Diem khac biet so voi cac approach khac:
-
-| Approach | Mo ta |
-|----------|-------|
-| A | Su dung `@pipecat-ai/client-js` Daily transport |
-| **B (approach nay)** | WebSocket truc tiep, tu implement RTVI binary protocol |
-| C | Su dung `@pipecat-ai/client-js` voi custom transport |
-
-**Uu diem cua Approach B:**
-- Kiem soat hoan toan qua trinh giao tiep
-- Khong phu thuoc vao thu vien ben thu ba cho transport
-- De debug va mo rong
-
-**Nhuoc diem:**
-- Can tu implement ma hoa/giai ma binary
-- Nhieu code hon so voi dung SDK
-
-## Yeu cau he thong
-
-- **Node.js** 18+ (khuyen nghi 20 LTS)
+- **Node.js** 18+ (khuyến nghị 20 LTS)
 - **npm** 9+
-- Trinh duyet ho tro WebRTC (Chrome, Firefox, Edge, Safari)
+- Trình duyệt hỗ trợ WebRTC (Chrome, Firefox, Edge)
 
-## Cai dat
+## Cài đặt
 
 ```bash
 cd approach-b-react
 npm install
 ```
 
-## Phat trien (Development)
+## Phát triển (Development)
 
 ```bash
 npm run dev
 ```
 
-Mo trinh duyet tai `http://localhost:5173` (port co the khac neu 5173 da duoc su dung).
+Mở trình duyệt tại `http://localhost:5173/ac/pipecat-client-web/react/`.
 
 ## Build
 
@@ -54,92 +37,118 @@ Mo trinh duyet tai `http://localhost:5173` (port co the khac neu 5173 da duoc su
 npm run build
 ```
 
-San pham build se nam trong thu muc `dist/`.
+Output trong thư mục `dist/`.
 
-## Deploy
-
-1. Build project: `npm run build`
-2. Copy toan bo thu muc `dist/` len web server
-3. Cau hinh web server de phuc vu SPA (Single Page Application):
-   - Tat ca request khong phai file tinh phai tra ve `index.html`
-   - Vi du voi Nginx:
-     ```nginx
-     location /ac/pipecat-client-web/ {
-         alias /var/www/pipecat-client-web/;
-         try_files $uri $uri/ /ac/pipecat-client-web/index.html;
-     }
-     ```
-   - Voi IIS: Su dung URL Rewrite module
-
-### CORS Configuration
-
-Neu backend Pipecat Server nam o domain khac, can cau hinh CORS:
-
-**Tren Pipecat Server:**
-```
-Access-Control-Allow-Origin: *
-Access-Control-Allow-Methods: GET, POST, OPTIONS
-Access-Control-Allow-Headers: *
-```
-
-**WebSocket** khong bi anh huong boi CORS -- chi can dam bao WebSocket server chap nhan ket noi tu origin cua web client.
-
-## Cau truc du an
+## Cấu trúc dự án
 
 ```
 approach-b-react/
 ├── index.html
 ├── package.json
-├── tsconfig.json
-├── tsconfig.app.json
 ├── vite.config.ts
 ├── README.md
+├── docs/
+│   └── audio-quality-parameters.md    # Audio quality parameter docs
 └── src/
     ├── main.tsx                   # Entry point
     ├── App.tsx                    # Main component + layout
     ├── App.css                    # Dark theme styles
-    ├── vite-env.d.ts              # Vite type declarations
-    ├── protocol/
-    │   ├── encode.ts              # Binary message encoding (RTVI)
-    │   ├── decode.ts              # Binary message decoding (RTVI)
-    │   └── types.ts               # RTVI message type definitions
-    ├── websocket/
-    │   └── useWebSocket.ts        # React hook for WebSocket + RTVI protocol
-    ├── audio/
-    │   └── useAudio.ts            # React hook for mic/speaker audio
-    └── components/
-        ├── ConnectForm.tsx        # Phone input + Connect/Disconnect button
-        ├── StatusPanel.tsx        # Connection status indicator
-        ├── DebugLog.tsx           # Scrollable debug log panel
-        └── Transcript.tsx         # Conversation transcript display
+    ├── hooks/
+    │   └── usePipecatClient.ts    # PipecatClient hook (connect/disconnect/state)
+    └── transport/
+        └── WebSocketTransport.ts  # Custom transport: protobuf bridge protocol
 ```
 
-## Cong nghe su dung
+## Giao thức
 
-- **Vite** 5 - Build tool
-- **React** 18 - UI library
-- **TypeScript** 5 - Type safety
-- **WebSocket API** - Native browser WebSocket
-- **Web Audio API** - Audio capture and playback
+### Bridge Protocol
 
-## Giao thuc
+Kết nối qua bridge server:
 
-### WebSocket URL
+1. **POST** `/connect` (empty body) → nhận `{ ws_url: "wss://..." }`
+2. **WebSocket** connect tới `ws_url`
+3. Gửi RTVI `client-ready` → nhận `bot-ready`
+4. Gửi audio dạng **protobuf AudioRawFrame** (Int16 PCM @ 16000Hz mono)
+5. Nhận message dạng **protobuf MessageFrame** (RTVI JSON)
+6. Nhận audio dạng **protobuf AudioRawFrame** (Int16 PCM) → playback
 
-```
-wss://aeon-pipecat.securityzone.vn/ws?phone={phone}&conv&conversation_id={uuid}
-```
-
-### Binary Message Format
+### Protobuf Frame Format
 
 ```
-[0x22] [outer_len: varint] [0x0A] [json_len: varint] [JSON payload]
+Frame (oneof):
+  2: AudioRawFrame { 3: audio (Int16 PCM bytes), 4: sample_rate, 5: num_channels }
+  4: MessageFrame   { 1: data (JSON string) }
 ```
 
-### Message Flow
+Byte layout:
+- Audio: `0x12 [len_varint] 0x1A [len_varint] [PCM] 0x20 [sr_varint] 0x28 [nc_varint]`
+- Message: `0x22 [len_varint] 0x0A [len_varint] [JSON]`
 
-1. WebSocket ket noi -> gui `client-ready`
-2. Nhan `bot-ready` -> ket noi thanh cong
-3. Gui/nhan audio binary data (Float32 PCM, 16kHz, mono)
-4. Nhan `user-transcription`, `bot-output` messages
-5. Ngat ket noi: gui `disconnect-bot` -> dong WebSocket
+MessageFrame (field 4) trùng byte layout với RTVI 0x22 format gốc.
+
+### Initiator Chain (PipecatClient)
+
+```
+PipecatClient.startBotAndConnect({ endpoint })
+  ├── startBot({ endpoint })        → POST /connect → nhận connection params
+  └── transport.connect(params)     → WebSocket connect
+       └── transport._connect()     → ws.onopen → bắt đầu gửi audio
+```
+
+## Chất lượng âm thanh (STT)
+
+| Tham số | Giá trị | Ghi chú |
+|---------|---------|---------|
+| Mic constraints | `{ audio: true }` | Không dùng explicit echoCancellation / noiseSuppression — tránh browser xử lý aggressive làm giảm chất lượng STT |
+| AudioContext sampleRate | 16000 Hz | Bridge server kỳ vọng 16kHz |
+| Gain boost | Không dùng | Gain gây clipping, không cải thiện STT |
+| Float32 → Int16 | `s<0 ? s*0x8000 : s*0x7fff` | Công thức chuẩn, giống `pipecat-sdk.js` |
+| ScriptProcessor bufferSize | 4096 | 256ms mỗi chunk |
+
+Chi tiết: xem [`docs/audio-quality-parameters.md`](docs/audio-quality-parameters.md).
+
+## Các chỉnh sửa so với code gốc
+
+### WebSocketTransport.ts
+
+| Thay đổi | Trước | Sau |
+|----------|-------|-----|
+| **Mic constraints** | `{ channelCount: exact(1), sampleRate: 16000, echoCancellation: true, noiseSuppression: true, autoGainControl: true }` | `{ audio: true }` |
+| **Gain boost** | GainNode ×2.0 (6dB) | Không gain |
+| **Audio graph** | source → gain → processor → MediaStreamDestination | source → processor → zero-gain → destination |
+| **Bot audio playback** | AudioBuffer + source → dest | Giữ nguyên (cơ chế tương tự) |
+| **Protobuf encode** | Thêm `encodeAudioFrame()`, `decodeAudioFrame()` | Manual varint encoding (không thư viện) |
+
+### usePipecatClient.ts
+
+| Thay đổi | Trước | Sau |
+|----------|-------|-----|
+| **enableMic** | `false` + gọi `initDevices()` trước | Giữ nguyên (cần thiết cho initiator chain) |
+| **endpoint** | `https://rtstt-demo.securityzone.vn/connect` | Giữ nguyên |
+| **requestData** | Không gửi (empty body) | Giữ nguyên |
+
+### Quá trình debug
+
+1. **Lỗi:** Bot không nghe được gì (connection drop sau ~1.4s)
+   - **Nguyên nhân:** Gửi raw Float32 PCM thay vì protobuf AudioRawFrame với Int16 PCM
+   - **Fix:** Implement `encodeAudioFrame()` — bọc Int16 PCM trong protobuf frame
+
+2. **Lỗi:** STT nhận dạng rất kém, phải nói rất to nhiều lần
+   - **Nguyên nhân:** Explicit mic constraints (`echoCancellation` + `noiseSuppression` + `autoGainControl`) làm browser xử lý âm thanh aggressive
+   - **Fix:** Đổi thành `{ audio: true }` (giống Approach A), bỏ GainNode ×2.0
+
+3. **Lỗi:** ScriptProcessorNode không firing
+   - **Nguyên nhân:** Audio graph không được giữ alive
+   - **Fix:** Connect processor → zero-gain node → audioContext.destination
+
+## So sánh với các approach khác
+
+| Tiêu chí | Approach A (HTML/JS) | Approach B (React) | Approach C (Vite + TS) |
+|---|---|---|---|
+| Framework | Không | React 18 | Không (vanilla) |
+| TypeScript | Không | Có | Có |
+| Bundle size | ~15KB | ~152KB JS | ~12KB JS |
+| SDK | `pipecat-sdk.js` (custom) | `@pipecat-ai/client-js` | Tự implement |
+| Bridge protocol | Không | Có (protobuf) | Có (protobuf) |
+| Mic constraints | `{ audio: true }` | `{ audio: true }` | `{ audio: true }` |
+| Initiator chain | BotClient | PipecatClient | startBot/connect/startBotAndConnect |
