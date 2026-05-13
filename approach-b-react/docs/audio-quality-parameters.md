@@ -155,3 +155,44 @@ function int16ToFloat32(uint8Bytes: Uint8Array): Float32Array {
 | Float32→Int16 | `s<0 ? s*0x8000 : s*0x7fff` | (công thức chuẩn) |
 | Protobuf AudioRawFrame field 3 | Int16 PCM raw | (dùng manual encode) |
 | ScriptProcessor bufferSize | 4096 | (chỉ ảnh hưởng latency) |
+
+---
+
+## 9. Git Workflow: Branch vs Pull Request
+
+### Branch (nhánh)
+
+```bash
+git checkout -b ten-nhanh          # tạo nhánh mới (local)
+git push -u origin ten-nhanh       # đẩy nhánh lên GitHub (remote)
+```
+
+**Bản chất:** Thao tác git thuần túy. Đơn giản là tạo một nhánh code mới và đưa lên GitHub để lưu trữ / chia sẻ.
+
+**Kết quả:** Branch mới hiện ra trên GitHub repository → Branches, nhưng không có thông báo hay đề nghị gì với ai.
+
+### Pull Request (PR)
+
+```bash
+gh pr create --title "..." --body "..."
+```
+
+**Bản chất:** Một concept của GitHub (không phải git command). PR là **yêu cầu chính thức** để hợp nhất (merge) code từ một branch vào branch khác (thường là `main`).
+
+**Kết quả:**
+- Tạo một trang trên GitHub có title, description, kèm conversation thread
+- Gửi thông báo cho người review code
+- Cho phép người khác review, comment, approve trước khi merge
+- Có thể gắn CI/CD checks, thể hiện trong GitHub project board
+- Sau khi merge mới chính thức đưa thay đổi vào `main`
+
+### So sánh nhanh
+
+| | Branch mới | Pull Request |
+|---|---|---|
+| **Bản chất** | Công việc kỹ thuật git thuần túy | Quy trình làm việc (workflow) trên GitHub |
+| **Ai thấy** | Chỉ người có quyền truy cập repo | Mọi người được tag/thông báo |
+| **Review code** | Không | Có (người khác review trước khi merge) |
+| **Tự động** | Push đến remote là xong | Có CI checks, auto-merge options |
+| **Cuối cùng** | Branch chỉ là một nhánh code riêng | Merge vào `main` hoặc close nếu không dùng nữa |
+| **Khi nào dùng** | Cần lưu code lên GitHub để backup / share | Cần người khác review, hoặc chuẩn bị merge vào main |
