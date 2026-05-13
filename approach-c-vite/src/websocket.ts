@@ -34,6 +34,7 @@ export class WebSocketManager {
 
   /**
    * POST /connect (empty body) → get wsUrl from the bridge server.
+   * Handles both camelCase (wsUrl) and snake_case (ws_url) response keys.
    */
   async startBot(endpoint: string): Promise<string> {
     this.log(`startBot: fetching wsUrl from ${endpoint}...`);
@@ -41,7 +42,11 @@ export class WebSocketManager {
     if (!response.ok) {
       throw new Error(`startBot failed: ${response.status}`);
     }
-    const { wsUrl } = await response.json();
+    const data = await response.json() as Record<string, unknown>;
+    const wsUrl = (data.wsUrl || data.ws_url) as string | undefined;
+    if (!wsUrl) {
+      throw new Error(`startBot: no wsUrl/ws_url in response: ${JSON.stringify(data)}`);
+    }
     this.log(`startBot: got wsUrl=${wsUrl}`);
     return wsUrl;
   }
