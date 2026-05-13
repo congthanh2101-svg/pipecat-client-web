@@ -1,140 +1,162 @@
-# Approach A - Single HTML File
+# Approach A - Single HTML File (Pipecat SDK)
 
-A self-contained HTML client for connecting to Pipecat AI Server via WebSocket using the RTVI (Real-Time Voice Interface) protocol.
+A self-contained HTML client for connecting to Pipecat AI Server via WebSocket using the RTVI protocol. Built with `pipecat-sdk.js` — a custom SDK wrapping `BotClient` + `WebSocketTransport`.
 
-## Description
+## Công nghệ sử dụng
 
-This approach bundles everything (HTML, CSS, JavaScript) into a single `index.html` file with zero external dependencies. It communicates with the Pipecat AI Server using:
+- **HTML + CSS + JavaScript** thuần (single file, zero dependencies)
+- **pipecat-sdk.js** — Custom SDK (BotClient + WebSocketTransport)
+- **Web Audio API** — Audio capture and playback
+- **WebSocket** — Real-time communication
 
-- **Protocol**: RTVI over WebSocket with binary protobuf-like message encoding
-- **Audio**: Raw PCM Float32, 16000 Hz, mono (both directions)
-- **Connection**: `wss://aeon-pipecat.securityzone.vn/ws?phone={phone}&conv&conversation_id={uuid}`
+## Yêu cầu hệ thống
 
-## How to Use
+- Trình duyệt hỗ trợ WebRTC (Chrome, Firefox, Edge)
+- Microphone
 
-1. Open `index.html` in a modern browser (Chrome 90+, Edge 90+, or Firefox 90+)
-2. Enter a phone number in the input field (default: `0909835115`)
+## Cách sử dụng
+
+1. Mở `index.html` trong trình duyệt (hoặc serve qua web server)
+2. Nhập số điện thoại (mặc định: `0909835115`)
 3. Click **Connect**
-4. Grant microphone permission when prompted by the browser
-5. Speak - you will see transcriptions in the left panel and hear bot responses
-6. Click **Disconnect** to end the session
+4. Cấp quyền microphone
+5. Nói — transcript hiển thị bên trái, bot trả lời qua loa
+6. Click **Disconnect** để kết thúc
 
-## File Structure
+## Cấu trúc file
 
 ```
 approach-a-html/
-  index.html   - Main application (HTML + CSS + JS, fully self-contained)
-  README.md    - This file
+  index.html     - Main application (HTML + CSS + JS + SDK)
+  assets/
+    pipecat-sdk.js - Pipecat Client SDK (BotClient + WebSocketTransport)
+  README.md      - This file
+  BUG_REPORT.md  - Bug report from initial testing
 ```
 
-### Internal Architecture of index.html
+## Kiến trúc
 
-| Section | Description |
-|---------|-------------|
-| HTML     | Header with gradient, status indicator, phone input, connect/disconnect button, transcript panel, debug log panel |
-| CSS      | Dark theme, responsive layout (flexbox), custom scrollbars, status animations |
-| JS: Varint | Protobuf-style varint encode/decode for message length framing |
-| JS: RTVI Codec | `encodeMessage()` / `decodeMessage()` - binary message framing with 0x22/0x0A tags |
-| JS: RTVI Messages | `createClientReadyMsg()`, `createRTVIMessage()` - RTVI protocol message helpers |
-| JS: WebSocket | Connection management, message routing (RTVI vs audio), reconnection handling |
-| JS: Audio Capture | AudioWorklet (preferred) or ScriptProcessorNode (fallback) for mic capture at 16kHz mono |
-| JS: Audio Playback | AudioBufferSourceNode with scheduling for gapless bot audio playback |
-| JS: Resampling | Linear interpolation resampler for converting between browser AudioContext rate and 16kHz |
-| JS: UI | Status indicator (4 states: disconnected/connecting/connected/error), transcript panel, timestamped debug log |
+| Thành phần | Mô tả |
+|------------|-------|
+| HTML | Header, status indicator, phone input, connect/disconnect button, transcript panel, debug log |
+| CSS | Dark theme, flexbox layout, status animations |
+| SDK: BotClient | Quản lý kết nối bot, initiator chain, event callbacks |
+| SDK: WebSocketTransport | WebSocket transport với protobuf bridge protocol |
+| SDK: Audio | WavRecorder (AudioWorklet @ 8000Hz) cho mic, MediaStream cho bot audio |
+| UI Code | 3 sections: Debug Logging, Status Management, Transcript |
 
-## Binary Message Format
+## Giao thức
 
+### Bridge Protocol
+
+1. **POST** `/connect` → nhận `{ ws_url: "wss://..." }`
+2. **WebSocket** connect tới `ws_url`
+3. Gửi RTVI `client-ready` → nhận `bot-ready`
+4. Gửi audio dạng Int16 PCM
+5. Nhận RTVI JSON messages (transcript, bot output)
+6. Nhận audio dạng Int16 PCM → phát qua `<audio>` element
+
+So với code cũ (kết nối trực tiếp `wss://aeon-pipecat.securityzone.vn/ws`), code mới sử dụng bridge server để lấy WebSocket URL.
+
+## Các chỉnh sửa so với code gốc
+
+### index.html — Tổng quan
+
+| Thay đổi | Trước | Sau |
+|----------|-------|-----|
+| **Engine** | Raw WebSocket + manual RTVI encode/decode (~550 dòng custom code) | `BotClient` + `WebSocketTransport` từ `pipecat-sdk.js` |
+| **Connection** | WebSocket trực tiếp tới `wss://aeon-pipecat.securityzone.vn/ws` với URL override logic | POST `https://rtstt-demo.securityzone.vn/connect` → nhận wsUrl → SDK connect |
+| **Audio capture** | AudioWorklet (custom `audio_processor`) hoặc ScriptProcessorNode fallback | SDK tự quản lý (WavRecorder, AudioWorklet @ 8000Hz) |
+| **Bot audio playback** | Protobuf frame extract → Int16→Float32 → resample → AudioBufferSourceNode với scheduling | `<audio autoplay>` element với `srcObject` từ `pcClient.tracks().bot.audio` |
+| **RTVI messages** | Manual 0x22 decode + JSON parse + switch case | SDK callbacks: `onBotReady`, `onUserTranscript`, `onBotTranscript`, `onTrackStarted` |
+| **client-ready version** | `1.0.0` | `1.3.0` |
+| **Mic forwarding** | Gate trên `bot-tts-stopped` event (greeting completion) | SDK tự quản lý |
+| **Keepalive** | RTVI ping heartbeat + silence frame generator | SDK tự quản lý |
+| **Code size** | ~750 dòng JS (custom) | ~80 dòng JS + SDK |
+
+### Chi tiết thay đổi
+
+#### Kết nối
+
+```javascript
+// TRƯỚC: Kết nối trực tiếp với URL override logic
+const DIRECT_WS = 'wss://aeon-pipecat.securityzone.vn/ws';
+const params = new URLSearchParams(window.location.search);
+const wsOverride = params.get('ws');
+// ... logic phức tạp để chọn direct/proxy/default URL ...
+ws = new WebSocket(WS_URL);
+
+// SAU: Bridge server qua SDK
+pcClient = new BotClient({
+  transport: new WebSocketTransport(),
+  enableMic: true,
+  callbacks: { onConnected, onDisconnected, onBotReady, ... }
+});
+await pcClient.initDevices();
+await pcClient.startBotAndConnect({ endpoint: CONNECT_URL });
 ```
-[0x22] [outer_len: varint] [0x0A] [json_len: varint] [JSON UTF-8 bytes]
+
+#### Audio capture
+
+```javascript
+// TRƯỚC: AudioWorklet + Float32→Int16 + resampling + silence keepalive
+// ~200 dòng: AudioProcessor worklet, readChannelData, formatAudioData, floatTo16BitPCM
+
+// SAU: SDK tự xử lý capture
+// enableMic: true → SDK tự tạo WavRecorder, gửi audio qua transport
 ```
 
-Example for `{"label":"rtvi-ai","type":"client-ready",...}`:
-```
-22 c0 02 0a bd 02 + JSON bytes
-```
+#### Bot audio
 
-- `0x22` = outer field tag (field 4, wire type 2 - length-delimited)
-- `outer_len` = length of everything after the outer varint (covers 0x0A + inner_varint + JSON)
-- `0x0A` = inner field tag (field 1, wire type 2 - length-delimited)
-- `inner_len` = length of JSON payload in bytes
-- Audio data is sent as raw Float32 PCM (without the protobuf wrapper)
+```javascript
+// TRƯỚC: protobuf frame parse + Int16→Float32 + resample + BufferSource scheduling
+function extractAudioFromFrame(data) { /* scan 0x12 frame */ }
+function playInt16PCM(int16Buffer) { /* convert + resample + schedule */ }
 
-## RTVI Message Flow
-
-1. WebSocket connects
-2. Client sends `client-ready` with library info and platform details
-3. Server responds with `bot-ready` - connection is established
-4. Client streams mic audio as raw PCM Float32 binary frames
-5. Server streams bot audio as raw PCM Float32 binary frames
-6. Server sends `user-transcription` and `bot-output` JSON messages for text
-7. On disconnect, client sends `disconnect-bot` then closes the WebSocket
-
-## Deploy Instructions
-
-### Local Development
-Simply open `index.html` in a browser. No web server required (works with `file://` protocol).
-
-### Production Deployment
-Serve the file from any static web server:
-
-**Nginx:**
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
-    root /var/www/pipecat-client;
-
-    location / {
-        try_files $uri /index.html;
-    }
-
-    # Ensure correct MIME types
-    include /etc/nginx/mime.types;
+// SAU: MediaStreamTrack → <audio> element
+function setupBotAudio(track) {
+  botAudio.srcObject = new MediaStream([track]);
 }
 ```
 
-**IIS (Windows):**
-1. Copy `index.html` to your site's physical path (e.g., `C:\inetpub\wwwroot\pipecat-client\`)
-2. Ensure the MIME type `.html` maps to `text/html` (default in IIS)
+## Debug history
 
-**Python (quick serve):**
-```bash
-python -m http.server 8080
-```
+| # | Vấn đề | Nguyên nhân | Fix |
+|---|--------|-------------|-----|
+| 1 | Server đóng kết nối ngay sau bot-ready (code 1000) | Server chờ HTTP startBot hoặc audio input không có | Chuyển sang SDK flow (startBotAndConnect), update RTVI version |
+| 2 | ScriptProcessorNode audio feedback loop | ScriptProcessorNode output connect trực tiếp tới destination | Route qua GainNode (gain = 0) |
+| 3 | AudioContext không resume | Chrome khởi tạo AudioContext ở trạng thái suspended | Thêm `await audioCtx.resume()` |
+| 4 | Thiếu bot speaking indicator | Không handler cho bot-tts-started/stopped | Thêm UI indicator (sau này chuyển sang SDK callback) |
+| 5 | Audio queue không handle interruption | nextPlayTime không được flush khi bot nói mới | Clear queue khi bot-tts-started |
+| 6 | RTVI version sai | Gửi version 1.0.0 thay vì 1.3.0 | Đổi thành 1.3.0 |
+| 7 | Không WebSocket keepalive | Không ping/pong | RTVI ping mỗi 15s (sau này SDK tự quản lý) |
 
-### Docker
-```dockerfile
-FROM nginx:alpine
-COPY index.html /usr/share/nginx/html/
-EXPOSE 80
-```
+## So sánh với các approach khác
 
-## CORS Notes
+| Tiêu chí | Approach A (HTML/SDK) | Approach B (React) | Approach C (Vite + TS) |
+|---|---|---|---|
+| Framework | Không (SDK) | React 18 | Không (vanilla) |
+| TypeScript | Không | Có | Có |
+| Bundle size | ~18KB (HTML) + SDK | ~152KB JS | ~12KB JS |
+| SDK | `pipecat-sdk.js` (custom BotClient) | `@pipecat-ai/client-js` | Tự implement WebSocket + Audio |
+| Bridge protocol | Có (qua SDK) | Có (protobuf) | Có (protobuf) |
+| Mic constraints | SDK quản lý (default) | `{ audio: true }` | `{ audio: true }` |
+| Bot audio | `<audio>` element (MediaStream) | AudioBuffer + source | AudioBuffer + source |
+| Initiator chain | BotClient (SDK) | PipecatClient | startBot/connect/startBotAndConnect |
 
-WebSocket connections are subject to the browser's same-origin policy:
+## Chất lượng âm thanh (STT)
 
-- The WebSocket handshake includes an `Origin` header automatically set by the browser
-- The Pipecat server at `aeon-pipecat.securityzone.vn` must accept WebSocket connections from the origin where this HTML file is served
-- If serving from a different domain, the server must be configured to allow the connection
-- Unlike HTTP requests, WebSocket connections do not require preflight (OPTIONS) requests
-- If connection fails with a 403 or similar, verify the server allows WebSocket connections from your origin
+| Tham số | Giá trị | Ghi chú |
+|---------|---------|---------|
+| Mic constraints | SDK default | SDK WavRecorder quản lý capture |
+| Audio sample rate | 8000 Hz (WavRecorder) | SDK worklet xử lý |
+| Float32 → Int16 | `s<0 ? s*0x8000 : s*0x7fff` | Công thức chuẩn Int16 PCM |
+| AudioWorklet buffer | 4096 samples | WavRecorder default |
 
-For local development (file:// protocol), the `Origin` header is typically `null` or empty - ensure the server accepts this.
+Chi tiết: xem [`docs/audio-quality-parameters.md`](../approach-b-react/docs/audio-quality-parameters.md).
 
-## Browser Compatibility
+## Ghi chú triển khai
 
-| Feature | Chrome | Edge | Firefox | Safari |
-|---------|--------|------|---------|--------|
-| WebSocket | Yes | Yes | Yes | Yes |
-| Web Audio API | Yes | Yes | Yes | Yes |
-| getUserMedia | Yes | Yes | Yes | Yes (requires HTTPS) |
-| AudioWorklet | Yes (66+) | Yes (79+) | Yes (76+) | Yes (14.1+) |
-| ScriptProcessorNode (fallback) | Yes | Yes | Yes | Yes |
-
-## Limitations
-
-- Single session at a time (one WebSocket connection)
-- No echo cancellation beyond browser built-in (rely on `echoCancellation: true` constraint)
-- Audio resampling is linear interpolation (adequate for speech, not studio quality)
-- ScriptProcessorNode fallback introduces slightly higher latency than AudioWorklet
-- Debug log is capped at 300 entries to prevent memory issues
+- **Local:** Có thể mở trực tiếp `index.html` bằng `file://` protocol
+- **Production:** Serve qua web server (IIS, Nginx). File đang deploy tại `C:\inetpub\AC\pipecat-client-web\html\`
+- URL public: `https://web.securityzone.vn/ac/pipecat-client-web/html/`
