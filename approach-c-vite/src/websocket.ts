@@ -28,82 +28,90 @@ export class WebSocketManager {
     this.onAudioBinary = handler;
   }
 
+  // ---------------------------------------------------------------------------
+  // Initiator chain (matches @pipecat-ai/client-js PipecatClient)
+  // ---------------------------------------------------------------------------
+
   /**
-   * Connect via bridge protocol: POST to endpoint → get wsUrl → WebSocket.
-   * Returns a promise that resolves when the WebSocket opens.
+   * POST /connect (empty body) → get wsUrl from the bridge server.
    */
-  connect(endpoint: string, phone: string, conversationId: string): Promise<void> {
-    return new Promise<void>(async (resolve, reject) => {
+  async startBot(endpoint: string): Promise<string> {
+    this.log(`startBot: fetching wsUrl from ${endpoint}...`);
+    const response = await fetch(endpoint, { method: 'POST' });
+    if (!response.ok) {
+      throw new Error(`startBot failed: ${response.status}`);
+    }
+    const { wsUrl } = await response.json();
+    this.log(`startBot: got wsUrl=${wsUrl}`);
+    return wsUrl;
+  }
+
+  /**
+   * WebSocket connect to a wsUrl (returned by startBot).
+   * Resolves when the WebSocket opens and client-ready is sent.
+   */
+  connect(wsUrl: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
       if (this.ws) {
         this.disconnect();
       }
 
-      this.log(`Fetching wsUrl from ${endpoint}...`);
+      this.log(`connect: connecting to ${wsUrl}`);
       this.setState('connecting');
 
-      try {
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone, conversation_id: conversationId }),
-        });
+      const ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer';
 
-        if (!response.ok) {
-          const errText = await response.text().catch(() => '');
-          throw new Error(`Connect request failed: ${response.status} ${errText}`);
+      ws.onopen = () => {
+        this.ws = ws;
+        this.log('connect: WebSocket opened, sending client-ready');
+        this.setState('connected');
+
+        const msg = createClientReady();
+        this.sendRTVI(msg);
+        this.log(`connect: sent client-ready`);
+
+        // Flush any pending audio (captured before WS opened)
+        for (const audio of this.pendingAudio) {
+          ws.send(audio);
         }
+        this.pendingAudio = [];
+        resolve();
+      };
 
-        const { wsUrl } = await response.json();
-        this.log(`Got wsUrl: ${wsUrl}`);
-        this._connectWs(wsUrl, resolve, reject);
-      } catch (e) {
-        this.log(`Connect error: ${e}`);
+      ws.onmessage = (event: MessageEvent) => {
+        if (event.data instanceof ArrayBuffer) {
+          this.handleBinaryMessage(event.data);
+        } else if (typeof event.data === 'string') {
+          this.log(`Text message: ${event.data}`);
+        }
+      };
+
+      ws.onclose = (event: CloseEvent) => {
+        this.ws = null;
+        this.log(`WebSocket closed: code=${event.code} reason=${event.reason}`);
+        this.setState('disconnected');
+      };
+
+      ws.onerror = () => {
+        this.log('WebSocket error');
         this.setState('error');
-        reject(e);
-      }
+        reject(new Error('WebSocket connection error'));
+      };
     });
   }
 
-  private _connectWs(wsUrl: string, resolve: () => void, reject: (reason?: unknown) => void): void {
-    this.log(`Connecting WebSocket...`);
-    this.ws = new WebSocket(wsUrl);
-    this.ws.binaryType = 'arraybuffer';
-
-    this.ws.onopen = () => {
-      this.log('WebSocket connected, sending client-ready');
-      this.setState('connected');
-      const msg = createClientReady();
-      this.log(`Sent: ${msg}`);
-      this.sendRTVI(msg);
-
-      // Flush any pending audio
-      for (const audio of this.pendingAudio) {
-        this.ws!.send(audio);
-      }
-      this.pendingAudio = [];
-      resolve();
-    };
-
-    this.ws.onmessage = (event: MessageEvent) => {
-      if (event.data instanceof ArrayBuffer) {
-        this.handleBinaryMessage(event.data);
-      } else if (typeof event.data === 'string') {
-        this.log(`Text message: ${event.data}`);
-      }
-    };
-
-    this.ws.onclose = (event: CloseEvent) => {
-      this.log(`WebSocket closed: code=${event.code} reason=${event.reason}`);
-      this.setState('disconnected');
-      this.ws = null;
-    };
-
-    this.ws.onerror = () => {
-      this.log('WebSocket error');
-      this.setState('error');
-      reject(new Error('WebSocket connection error'));
-    };
+  /**
+   * Convenience: startBot (POST) → await → connect (WebSocket).
+   */
+  async startBotAndConnect(endpoint: string): Promise<void> {
+    const wsUrl = await this.startBot(endpoint);
+    await this.connect(wsUrl);
   }
+
+  // ---------------------------------------------------------------------------
+  // Lifecycle
+  // ---------------------------------------------------------------------------
 
   disconnect(): void {
     if (!this.ws) return;
@@ -122,6 +130,10 @@ export class WebSocketManager {
     }, 200);
     this.setState('disconnected');
   }
+
+  // ---------------------------------------------------------------------------
+  // Send helpers
+  // ---------------------------------------------------------------------------
 
   /**
    * Send binary data (expects protobuf AudioRawFrame from AudioManager).
@@ -147,6 +159,10 @@ export class WebSocketManager {
   getState(): ConnectionState {
     return this.state;
   }
+
+  // ---------------------------------------------------------------------------
+  // Internal
+  // ---------------------------------------------------------------------------
 
   private handleBinaryMessage(data: ArrayBuffer): void {
     // Protobuf MessageFrame (0x22) → decode RTVI JSON

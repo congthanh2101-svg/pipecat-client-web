@@ -141,11 +141,9 @@ document.addEventListener('DOMContentLoaded', () => {
         setStatus('', 'red');
         return;
       }
-      const convId = convIdInput.value.trim() || generateUUID();
-      convIdInput.value = convId;
-      logger.log(`Starting connection: phone=${phone} conv=${convId}`);
+      logger.log(`Starting connection...`);
       try {
-        await wsManager.connect(CONNECT_ENDPOINT, phone, convId);
+        await wsManager.startBotAndConnect(CONNECT_ENDPOINT);
         logger.log('Connection complete');
       } catch (e) {
         logger.log(`Connection failed: ${e}`);
