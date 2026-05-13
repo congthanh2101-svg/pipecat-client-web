@@ -70,3 +70,144 @@ export function createClientReady(): string {
 export function parseRTVIResponse(jsonStr: string): { label: string; type: string; data: unknown; id?: string } {
   return JSON.parse(jsonStr);
 }
+
+// ---------------------------------------------------------------------------
+// Protobuf AudioRawFrame helpers (bridge server protocol)
+// ---------------------------------------------------------------------------
+// Frame format:
+//   Frame { 2: AudioRawFrame { 3: audio (Int16 bytes), 4: sample_rate, 5: num_channels } }
+//   MessageFrame (field 4) happens to have same byte layout as RTVI 0x22
+
+/** Check if data is a protobuf AudioRawFrame (starts with 0x12). */
+export function isAudioFrame(data: ArrayBuffer): boolean {
+  if (data.byteLength === 0) return false;
+  return new Uint8Array(data)[0] === 0x12;
+}
+
+/**
+ * Wrap Int16 PCM bytes in a protobuf AudioRawFrame.
+ * Frame { 2: AudioRawFrame { 3: audio, 4: sample_rate, 5: num_channels } }
+ */
+export function encodeAudioFrame(
+  int16Bytes: Uint8Array,
+  sampleRate: number,
+  numChannels: number
+): ArrayBuffer {
+  const srVarint = encodeVarint(sampleRate);
+  const ncVarint = encodeVarint(numChannels);
+  const audioLenVarint = encodeVarint(int16Bytes.length);
+
+  const innerLen =
+    1 + audioLenVarint.length + int16Bytes.length +
+    1 + srVarint.length +
+    1 + ncVarint.length;
+
+  const inner = new Uint8Array(innerLen);
+  let off = 0;
+  inner[off++] = 0x1a; // field 3, wire type 2
+  audioLenVarint.forEach((b) => (inner[off++] = b));
+  inner.set(int16Bytes, off);
+  off += int16Bytes.length;
+  inner[off++] = 0x20; // field 4, wire type 0
+  srVarint.forEach((b) => (inner[off++] = b));
+  inner[off++] = 0x28; // field 5, wire type 0
+  ncVarint.forEach((b) => (inner[off++] = b));
+
+  const innerLenVarint = encodeVarint(inner.length);
+  const frame = new Uint8Array(1 + innerLenVarint.length + inner.length);
+  off = 0;
+  frame[off++] = 0x12; // field 2, wire type 2
+  innerLenVarint.forEach((b) => (frame[off++] = b));
+  frame.set(inner, off);
+  return frame.buffer;
+}
+
+/**
+ * Parse a protobuf AudioRawFrame.
+ */
+export function decodeAudioFrame(data: ArrayBuffer): {
+  int16Bytes: Uint8Array | null;
+  sampleRate: number;
+  numChannels: number;
+} {
+  const bytes = new Uint8Array(data);
+  let pos = 0;
+  if (bytes[pos] !== 0x12) return { int16Bytes: null, sampleRate: 16000, numChannels: 1 };
+  pos++;
+
+  let subLen = 0, shift = 0;
+  while (pos < bytes.length) {
+    const b = bytes[pos++];
+    subLen |= (b & 0x7f) << shift;
+    shift += 7;
+    if (!(b & 0x80)) break;
+  }
+  const subEnd = pos + subLen;
+
+  let int16Bytes: Uint8Array | null = null;
+  let sampleRate = 16000;
+  let numChannels = 1;
+
+  while (pos < subEnd) {
+    const tag = bytes[pos++];
+    const fieldNum = tag >> 3;
+    const wireType = tag & 7;
+
+    if (fieldNum === 3 && wireType === 2) {
+      let len = 0; shift = 0;
+      while (pos < subEnd) {
+        const b = bytes[pos++];
+        len |= (b & 0x7f) << shift;
+        shift += 7;
+        if (!(b & 0x80)) break;
+      }
+      int16Bytes = bytes.slice(pos, pos + len);
+      pos += len;
+    } else if (fieldNum === 4 && wireType === 0) {
+      let val = 0; shift = 0;
+      while (pos < subEnd) {
+        const b = bytes[pos++];
+        val |= (b & 0x7f) << shift;
+        shift += 7;
+        if (!(b & 0x80)) break;
+      }
+      sampleRate = val;
+    } else if (fieldNum === 5 && wireType === 0) {
+      let val = 0; shift = 0;
+      while (pos < subEnd) {
+        const b = bytes[pos++];
+        val |= (b & 0x7f) << shift;
+        shift += 7;
+        if (!(b & 0x80)) break;
+      }
+      numChannels = val;
+    } else {
+      if (wireType === 0) {
+        while (pos < subEnd && (bytes[pos] & 0x80)) pos++;
+        pos++;
+      } else if (wireType === 2) {
+        let len = 0; shift = 0;
+        while (pos < subEnd) {
+          const b = bytes[pos++];
+          len |= (b & 0x7f) << shift;
+          shift += 7;
+          if (!(b & 0x80)) break;
+        }
+        pos += len;
+      } else {
+        break;
+      }
+    }
+  }
+  return { int16Bytes, sampleRate, numChannels };
+}
+
+/** Convert Int16 PCM bytes to Float32 for playback. */
+export function int16ToFloat32(uint8Bytes: Uint8Array): Float32Array {
+  const int16 = new Int16Array(uint8Bytes.buffer, uint8Bytes.byteOffset, uint8Bytes.length >> 1);
+  const out = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) {
+    out[i] = int16[i] / 32768;
+  }
+  return out;
+}

@@ -12,6 +12,8 @@ import {
   setText
 } from './ui.js';
 
+const CONNECT_ENDPOINT = 'https://rtstt-demo.securityzone.vn/connect';
+
 document.addEventListener('DOMContentLoaded', () => {
   const logger = new DebugLogger('debug-log');
 
@@ -127,7 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Connect / Disconnect button
   const connectBtn = qs<HTMLButtonElement>('#btn-connect');
-  connectBtn.addEventListener('click', () => {
+  connectBtn.addEventListener('click', async () => {
     if (wsManager.getState() === 'connected' || wsManager.getState() === 'connecting') {
       logger.log('User requested disconnect');
       audioManager.stopCapture();
@@ -142,7 +144,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const convId = convIdInput.value.trim() || generateUUID();
       convIdInput.value = convId;
       logger.log(`Starting connection: phone=${phone} conv=${convId}`);
-      wsManager.connect(phone, convId);
+      try {
+        await wsManager.connect(CONNECT_ENDPOINT, phone, convId);
+        logger.log('Connection complete');
+      } catch (e) {
+        logger.log(`Connection failed: ${e}`);
+      }
     }
   });
 
