@@ -14,14 +14,7 @@ export class AudioManager {
   async startCapture(onAudioData: (data: ArrayBuffer) => void): Promise<void> {
     this.onAudioData = onAudioData;
     this.log('Requesting microphone access...');
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        sampleRate: this.sampleRate,
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true
-      }
-    });
+    this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     this.log('Microphone acquired');
     this.context = new AudioContext({ sampleRate: this.sampleRate });
     this.source = this.context.createMediaStreamSource(this.stream);
